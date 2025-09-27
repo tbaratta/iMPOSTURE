@@ -1,0 +1,62 @@
+/* Dark, simple styles for a clean hackathon-ready login */
+
+body {
+  background:#0B0F17;
+  color:#fff;
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI";
+}
+
+.wrap { width:320px; margin:40px auto; text-align:center; }
+
+h1 { margin:0 0 6px; font-size:24px; }
+
+.sub { color:#9AA4B2; margin:0 0 20px; }
+
+#card {
+  background:#111827;
+  border:1px solid #273047;
+  border-radius:12px;
+  padding:18px;
+}
+
+button {
+  width:100%;
+  padding:10px;
+  border:0;
+  border-radius:8px;
+  background:#4F46E5;
+  color:#fff;
+  font-weight:600;
+  margin:6px 0;
+  cursor:pointer;
+}
+
+button.secondary { background:#273047; }
+
+#status { margin-top:10px; color:#9AA4B2; }
+
+#profile {
+  text-align:left;
+  margin-top:12px;
+  background:#0F1626;
+  padding:10px;
+  border-radius:8px;
+}
+
+.hidden { display:none; }
+
+.foot { color:#6B7280; margin-top:14px; font-size:12px; }
+
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+  width:100%;
+  padding:10px;
+  margin:6px 0;
+  border-radius:8px;
+  border:1px solid #273047;
+  background:#0F1626;
+  color:#fff;
+}
+
+button.primary { background:#22c55e; } /* green for sign-up */

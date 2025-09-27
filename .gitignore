@@ -1,0 +1,14 @@
+﻿# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+
+# Local env files (don’t commit secrets)
+StraightUp/Login/Auth0/.env
+.env
+
+# OS
+.DS_Store
+Thumbs.db

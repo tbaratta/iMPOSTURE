@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Straight Up — Create account</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .wrap { max-width: 440px; width: 92%; margin: 40px auto; text-align: center; }
+    #card { margin: 0 auto; padding: 20px; border-radius: 14px; border: 1px solid #273047; background: #111827; box-sizing: border-box; }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+    .full { width: 100%; box-sizing: border-box; }
+    input[type="email"], input[type="password"], input[type="text"] {
+      width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #273047; background: #0F1626; color: #fff; outline: none;
+    }
+    button { width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Create your account</h1>
+    <p class="sub">It’s fast and free</p>
+
+    <div id="card">
+      <div class="stack">
+        <input id="nameIn"  class="full" type="text"     placeholder="Full name" autocomplete="name" />
+        <input id="email"   class="full" type="email"    placeholder="Email"     autocomplete="username" />
+        <input id="password" class="full" type="password" placeholder="Password"  autocomplete="new-password" />
+
+        <button id="btnSignup" class="primary">Create account</button>
+        <button id="gotoSignin" class="secondary">Back to sign in</button>
+
+        <div id="status">Status: <span id="statusText">Signed out</span></div>
+
+        <div id="profile" class="hidden" style="text-align:left">
+          <div><strong>Name:</strong> <span id="name"></span></div>
+          <div><strong>Email:</strong> <span id="emailOut"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <p class="foot">© Straight Up</p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
