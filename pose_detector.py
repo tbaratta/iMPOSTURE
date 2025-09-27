@@ -14,6 +14,7 @@ import mediapipe as mp
 import numpy as np
 import time
 from ultralytics import YOLO
+from collections import deque
 
 
 class CompletePoseDetector:
@@ -36,11 +37,17 @@ class CompletePoseDetector:
         self.phone_detection_history = []  # For tracking and smoothing
         self.max_history = 10
         
-        # Enhanced detection parameters
+        # TRUE MUID-IITR parameters
         self.enable_hand_phone_fusion = True  # Combine hand + phone detection
         self.phone_near_hand_threshold = 100  # pixels
+        self.compound_detection_threshold = 120  # Distance for compound boxes
+        self.usage_confidence_threshold = 0.5    # Minimum usage confidence
+        self.muid_detection_history = deque(maxlen=10)  # Usage history for smoothing
         
-        print("📱 Enhanced phone detection ready with MUID-IITR compatibility!")
+        print("📱 TRUE MUID-IITR phone usage detection ready!")
+        print("   ✅ Compound bounding boxes enabled")
+        print("   ✅ Usage scenario detection active")
+        print("   ✅ Hand-phone interaction analysis ready")
         
         # Initialize models
         self.face_mesh = self.mp_face_mesh.FaceMesh(
@@ -313,10 +320,13 @@ class CompletePoseDetector:
         phones_detected += len(coco_phones)
         phone_boxes.extend(coco_phones)
         
-        # Method 2: MUID-IITR Style Detection (enhanced for phone usage scenarios)
-        muid_phones = self._detect_phone_usage_scenarios(image, hand_landmarks)
-        phones_detected += len(muid_phones)
-        phone_boxes.extend(muid_phones)
+        # Method 2: TRUE MUID-IITR Compound Detection
+        compound_detections = self._detect_compound_usage_boxes(image, hand_landmarks)
+        phones_detected += len(compound_detections)
+        phone_boxes.extend(compound_detections)
+        
+        # Update detection history for smoothing
+        self.muid_detection_history.append(len(compound_detections))
         
         # Method 3: Hand-Phone Fusion (detect phones near hands)
         if self.enable_hand_phone_fusion and hand_landmarks:
@@ -361,12 +371,16 @@ class CompletePoseDetector:
         
         return phones
     
-    def _detect_phone_usage_scenarios(self, image, hand_landmarks):
-        """Detect phone usage scenarios (MUID-IITR style)"""
-        phones = []
+    def _detect_compound_usage_boxes(self, image, hand_landmarks):
+        """TRUE MUID-IITR: Detect compound bounding boxes for actual phone usage"""
+        if not hand_landmarks:
+            return []
         
-        # Look for additional objects that might be phones (tablets, rectangles near face/hands)
+        h, w = image.shape[:2]
+        
+        # Step 1: Get basic phone detections
         results = self.yolo_model(image, verbose=False)
+        basic_phones = []
         
         for result in results:
             boxes = result.boxes
@@ -375,30 +389,124 @@ class CompletePoseDetector:
                     class_id = int(box.cls)
                     confidence = float(box.conf)
                     
-                    # Check for related objects that might be phones in use
-                    phone_related_classes = [
-                        67,  # cell phone
-                        72,  # tv (sometimes detects tablets/large phones)
-                        73,  # laptop (sometimes detects tablets)
-                    ]
-                    
-                    if class_id in phone_related_classes and confidence > 0.2:
+                    if class_id == 67 and confidence > 0.3:  # Only cell phones
                         x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        
-                        # Additional validation for phone usage scenarios
-                        bbox_area = (x2 - x1) * (y2 - y1)
-                        aspect_ratio = (x2 - x1) / max(1, (y2 - y1))
-                        
-                        # Phone-like characteristics (rectangular, reasonable size)
-                        if (0.3 < aspect_ratio < 3.0 and 500 < bbox_area < 50000):
-                            phones.append({
-                                'bbox': (x1, y1, x2, y2),
-                                'confidence': confidence * 0.8,  # Slightly lower confidence
-                                'type': 'MUID-Style',
-                                'class_id': class_id
-                            })
+                        basic_phones.append({
+                            'bbox': (x1, y1, x2, y2),
+                            'center': ((x1 + x2) // 2, (y1 + y2) // 2),
+                            'confidence': confidence
+                        })
         
-        return phones
+        # Step 2: Get hand positions from MediaPipe
+        hand_positions = []
+        for hand_lm in hand_landmarks:
+            landmarks = []
+            for landmark in hand_lm.landmark:
+                x, y = int(landmark.x * w), int(landmark.y * h)
+                landmarks.append((x, y))
+            
+            # Calculate hand center and bounding box
+            min_x = min([p[0] for p in landmarks])
+            max_x = max([p[0] for p in landmarks])
+            min_y = min([p[1] for p in landmarks])
+            max_y = max([p[1] for p in landmarks])
+            center_x = (min_x + max_x) // 2
+            center_y = (min_y + max_y) // 2
+            
+            hand_positions.append({
+                'bbox': (min_x, min_y, max_x, max_y),
+                'center': (center_x, center_y),
+                'landmarks': landmarks,
+                'fingertips': [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]]
+            })
+        
+        # Step 3: Create compound detections (CORE MUID-IITR FEATURE)
+        compound_detections = []
+        for hand in hand_positions:
+            for phone in basic_phones:
+                distance = self._calculate_distance(hand['center'], phone['center'])
+                
+                if distance < self.compound_detection_threshold:
+                    # Create compound bounding box
+                    hand_bbox = hand['bbox']
+                    phone_bbox = phone['bbox']
+                    
+                    compound_x1 = min(hand_bbox[0], phone_bbox[0])
+                    compound_y1 = min(hand_bbox[1], phone_bbox[1])
+                    compound_x2 = max(hand_bbox[2], phone_bbox[2])
+                    compound_y2 = max(hand_bbox[3], phone_bbox[3])
+                    
+                    # Calculate usage confidence
+                    usage_confidence = self._calculate_usage_confidence(
+                        hand, phone, distance, image
+                    )
+                    
+                    if usage_confidence > self.usage_confidence_threshold:
+                        compound_detections.append({
+                            'compound_bbox': (compound_x1, compound_y1, compound_x2, compound_y2),
+                            'hand_bbox': hand_bbox,
+                            'phone_bbox': phone_bbox,
+                            'usage_confidence': usage_confidence,
+                            'distance': distance,
+                            'type': 'COMPOUND_USAGE',
+                            'hand_center': hand['center'],
+                            'phone_center': phone['center']
+                        })
+        
+        return compound_detections
+    
+    def _calculate_distance(self, point1, point2):
+        """Calculate Euclidean distance between two points"""
+        import math
+        return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+    
+    def _calculate_usage_confidence(self, hand, phone, distance, image):
+        """Calculate confidence that this represents actual phone usage"""
+        h, w = image.shape[:2]
+        
+        # Base confidence from proximity
+        proximity_score = 1.0 - (distance / self.compound_detection_threshold)
+        
+        # Bonus if phone is in upper portion (near face/ear)
+        phone_y = phone['center'][1]
+        face_area_bonus = 0.3 if phone_y < h * 0.6 else 0.0
+        
+        # Hand orientation analysis
+        orientation_score = self._analyze_hand_phone_orientation(hand, phone)
+        
+        # Size validation (phones shouldn't be too big or small in usage)
+        phone_bbox = phone['bbox']
+        phone_area = (phone_bbox[2] - phone_bbox[0]) * (phone_bbox[3] - phone_bbox[1])
+        relative_area = phone_area / (h * w)
+        size_penalty = 0.2 if relative_area > 0.15 or relative_area < 0.005 else 0.0
+        
+        usage_confidence = min(1.0, proximity_score + face_area_bonus + orientation_score - size_penalty)
+        return max(0.0, usage_confidence)
+    
+    def _analyze_hand_phone_orientation(self, hand, phone):
+        """Analyze if hand positioning suggests phone usage"""
+        fingertips = hand['fingertips']
+        phone_center = phone['center']
+        
+        # Count fingertips near phone
+        tips_near_phone = 0
+        for tip in fingertips:
+            tip_phone_distance = self._calculate_distance(tip, phone_center)
+            if tip_phone_distance < 80:
+                tips_near_phone += 1
+        
+        # More fingertips near phone = higher usage likelihood
+        orientation_score = (tips_near_phone / 5) * 0.3
+        
+        # Check if hand is "wrapped around" phone (usage position)
+        hand_center = hand['center']
+        hand_phone_vector = (phone_center[0] - hand_center[0], phone_center[1] - hand_center[1])
+        
+        # Bonus for typical holding positions
+        if abs(hand_phone_vector[0]) < 50 and hand_phone_vector[1] < 0:  # Phone above hand
+            orientation_score += 0.2
+        
+        return min(0.4, orientation_score)
     
     def _detect_phones_near_hands(self, image, hand_landmarks, existing_phones):
         """Detect potential phones near hand positions"""
@@ -435,8 +543,11 @@ class CompletePoseDetector:
                 
                 if near_hand:
                     # Check if it's not already detected
+                    contour_bbox = (x, y, x + w_rect, y + h_rect)
                     is_duplicate = any(
-                        self._boxes_overlap((x, y, x + w_rect, y + h_rect), phone['bbox'])
+                        self._boxes_overlap(contour_bbox, 
+                                          phone['compound_bbox'] if phone['type'] == 'COMPOUND_USAGE' 
+                                          else phone['bbox'])
                         for phone in existing_phones
                     )
                     
@@ -455,13 +566,29 @@ class CompletePoseDetector:
         if len(phone_boxes) <= 1:
             return phone_boxes
         
-        # Sort by confidence
-        phone_boxes.sort(key=lambda x: x['confidence'], reverse=True)
+        # Sort by confidence (handle different confidence key names)
+        def get_confidence(detection):
+            if 'usage_confidence' in detection:
+                return detection['usage_confidence']
+            elif 'confidence' in detection:
+                return detection['confidence']
+            else:
+                return 0.0
+        
+        phone_boxes.sort(key=get_confidence, reverse=True)
         
         filtered_phones = []
         for phone in phone_boxes:
+            # Get the bounding box for overlap detection
+            if phone['type'] == 'COMPOUND_USAGE':
+                phone_bbox = phone['compound_bbox']
+            else:
+                phone_bbox = phone['bbox']
+            
             is_duplicate = any(
-                self._boxes_overlap(phone['bbox'], existing['bbox'])
+                self._boxes_overlap(phone_bbox, 
+                                  existing['compound_bbox'] if existing['type'] == 'COMPOUND_USAGE' 
+                                  else existing['bbox'])
                 for existing in filtered_phones
             )
             if not is_duplicate:
@@ -491,36 +618,76 @@ class CompletePoseDetector:
         return iou > threshold
     
     def _draw_enhanced_phone_detections(self, image, phone_boxes):
-        """Draw enhanced phone detection visualizations"""
-        for phone in phone_boxes:
-            x1, y1, x2, y2 = phone['bbox']
-            confidence = phone['confidence']
-            detection_type = phone['type']
+        """Draw enhanced phone detection visualizations with TRUE MUID-IITR compound boxes"""
+        for detection in phone_boxes:
+            detection_type = detection['type']
             
-            # Different colors for different detection methods
-            if detection_type == 'COCO':
-                color = self.PHONE_COLOR  # Magenta
-                label_prefix = "📱PHONE"
-            elif detection_type == 'MUID-Style':
-                color = (255, 150, 0)  # Orange
-                label_prefix = "📱USAGE"
-            else:  # Hand-Fusion
-                color = (0, 255, 255)  # Yellow
-                label_prefix = "📱HAND+"
-            
-            # Draw glowing bounding box
-            cv2.rectangle(image, (x1, y1), (x2, y2), color, 4)
-            cv2.rectangle(image, (x1-2, y1-2), (x2+2, y2+2), color, 1)  # Outer glow
-            
-            # Enhanced label
-            label = f"{label_prefix} {confidence:.2f}"
-            label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-            
-            # Label background
-            cv2.rectangle(image, (x1, y1 - label_size[1] - 12), 
-                         (x1 + label_size[0] + 10, y1 - 2), color, -1)
-            cv2.putText(image, label, (x1 + 5, y1 - 8), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            if detection_type == 'COMPOUND_USAGE':
+                # TRUE MUID-IITR: Draw compound bounding box
+                compound_bbox = detection['compound_bbox']
+                hand_bbox = detection['hand_bbox']
+                phone_bbox = detection['phone_bbox']
+                usage_confidence = detection['usage_confidence']
+                
+                # Draw compound box (main MUID-IITR feature)
+                cv2.rectangle(image, (compound_bbox[0], compound_bbox[1]), 
+                             (compound_bbox[2], compound_bbox[3]), (0, 255, 255), 4)  # Yellow
+                
+                # Draw individual hand and phone boxes inside compound
+                cv2.rectangle(image, (hand_bbox[0], hand_bbox[1]), 
+                             (hand_bbox[2], hand_bbox[3]), (0, 255, 0), 2)  # Green hand
+                cv2.rectangle(image, (phone_bbox[0], phone_bbox[1]), 
+                             (phone_bbox[2], phone_bbox[3]), (255, 0, 255), 2)  # Magenta phone
+                
+                # Draw connection line
+                cv2.line(image, detection['hand_center'], detection['phone_center'], 
+                        (255, 255, 0), 2)
+                
+                # Usage confidence label
+                label = f"📱USAGE: {usage_confidence:.2f}"
+                label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                
+                cv2.rectangle(image, (compound_bbox[0], compound_bbox[1] - label_size[1] - 12), 
+                             (compound_bbox[0] + label_size[0] + 10, compound_bbox[1] - 2), 
+                             (0, 255, 255), -1)
+                cv2.putText(image, label, (compound_bbox[0] + 5, compound_bbox[1] - 8), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+                
+                # Distance indicator
+                distance_text = f"d:{detection['distance']:.0f}px"
+                cv2.putText(image, distance_text, 
+                           (compound_bbox[0], compound_bbox[3] + 20), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                
+            else:
+                # Standard detection (COCO, Hand-Fusion, etc.)
+                x1, y1, x2, y2 = detection['bbox']
+                confidence = detection.get('confidence', 0.0)
+                
+                # Different colors for different detection methods
+                if detection_type == 'COCO':
+                    color = self.PHONE_COLOR  # Magenta
+                    label_prefix = "📱PHONE"
+                elif detection_type == 'Hand-Fusion':
+                    color = (0, 255, 255)  # Yellow
+                    label_prefix = "📱HAND+"
+                else:
+                    color = (255, 150, 0)  # Orange
+                    label_prefix = "📱OTHER"
+                
+                # Draw glowing bounding box
+                cv2.rectangle(image, (x1, y1), (x2, y2), color, 4)
+                cv2.rectangle(image, (x1-2, y1-2), (x2+2, y2+2), color, 1)  # Outer glow
+                
+                # Enhanced label
+                label = f"{label_prefix} {confidence:.2f}"
+                label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+                
+                # Label background
+                cv2.rectangle(image, (x1, y1 - label_size[1] - 12), 
+                             (x1 + label_size[0] + 10, y1 - 2), color, -1)
+                cv2.putText(image, label, (x1 + 5, y1 - 8), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     
     def process_frame(self, image):
         """Process frame with all detection types"""
@@ -591,7 +758,8 @@ class CompletePoseDetector:
         print("   🤲 Hands: NEON skeleton with pulsing fingertips")
         print("   💪 Shoulders: HIGHLIGHTED with glow effects")
         print("   🏃 Body: ELECTRIC skeleton with animated joints")
-        print("   📱 Phones: ENHANCED detection (COCO + MUID-IITR + Hand-Fusion)")
+        print("   📱 Phones: TRUE MUID-IITR compound detection + COCO + Hand-Fusion)")
+        print("   🔬 MUID-IITR: Compound bounding boxes for actual usage detection")
         print("   ✨ All with GLOW EFFECTS and smooth animations!")
         print("\n⌨️  Controls:")
         print("   'q' or ESC: Quit application")
