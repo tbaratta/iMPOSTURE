@@ -4,44 +4,43 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Straight Up — Create account</title>
-  <link rel="stylesheet" href="style.css" />
   <style>
-    .wrap { max-width: 440px; width: 92%; margin: 40px auto; text-align: center; }
-    #card { margin: 0 auto; padding: 20px; border-radius: 14px; border: 1px solid #273047; background: #111827; box-sizing: border-box; }
-    .stack { display: flex; flex-direction: column; gap: 10px; }
-    .full { width: 100%; box-sizing: border-box; }
-    input[type="email"], input[type="password"], input[type="text"] {
-      width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #273047; background: #0F1626; color: #fff; outline: none;
-    }
-    button { width: 100%; }
+    :root{--bg:#0B0F17; --card:#111827; --border:#273047; --muted:#9AA4B2; --accent:#22c55e; --ghost:#273047}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; background:var(--bg); color:#fff; font-family:system-ui; display:grid; place-items:center}
+    .wrap{width:min(520px, 92vw); padding:clamp(16px,2vw,24px)}
+    #card{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:clamp(18px,2vw,24px)}
+    h1{text-align:center; margin:0 0 8px; font-size:clamp(22px, 4vw, 28px)}
+    .sub{text-align:center; color:var(--muted); margin:0 0 16px}
+    .stack{display:flex; flex-direction:column; gap:10px}
+    input{width:100%; padding:12px 14px; border-radius:10px; border:1px solid var(--border); background:#0F1626; color:#fff}
+    button{width:100%; padding:12px; border-radius:10px; font-weight:700; cursor:pointer; border:0}
+    .primary{background:var(--accent); color:#0b0f17}
+    .secondary{background:var(--ghost); color:#fff}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Create your account</h1>
-    <p class="sub">It’s fast and free</p>
-
     <div id="card">
+      <h1>Create your account</h1>
+      <p class="sub">It’s fast and free</p>
       <div class="stack">
-        <input id="nameIn"  class="full" type="text"     placeholder="Full name" autocomplete="name" />
-        <input id="email"   class="full" type="email"    placeholder="Email"     autocomplete="username" />
-        <input id="password" class="full" type="password" placeholder="Password"  autocomplete="new-password" />
-
-        <button id="btnSignup" class="primary">Create account</button>
+        <input id="nameIn" type="text" placeholder="Full name (stored after signup)" autocomplete="name" />
+        <button id="btnSignup" class="primary">Continue with Auth0</button>
         <button id="gotoSignin" class="secondary">Back to sign in</button>
-
-        <div id="status">Status: <span id="statusText">Signed out</span></div>
-
-        <div id="profile" class="hidden" style="text-align:left">
-          <div><strong>Name:</strong> <span id="name"></span></div>
-          <div><strong>Email:</strong> <span id="emailOut"></span></div>
-        </div>
       </div>
     </div>
-
-    <p class="foot">© Straight Up</p>
   </div>
-
-  <script src="app.js"></script>
+  <script>
+    const ORIGIN = location.origin;
+    // Persist the desired name temporarily; after first login we POST it to /profile.
+    document.getElementById('btnSignup').onclick = ()=>{
+      const n = (document.getElementById('nameIn').value || '').trim();
+      if (n) localStorage.setItem('pending_name', n);
+      location.href = `${ORIGIN}/auth/signup`;
+    };
+    document.getElementById('gotoSignin').onclick = ()=> location.href = `${ORIGIN}/UI/index`;
+  </script>
 </body>
 </html>

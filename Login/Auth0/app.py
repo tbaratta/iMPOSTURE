@@ -49,8 +49,8 @@ if not CLIENT_ID:
 cfg   = Auth0Config(domain=DOMAIN, client_id=CLIENT_ID, redirect_uri=REDIRECT_URI, audience=AUDIENCE)
 state = AuthState()
 
-INDEX_URL = f"http://127.0.0.1:{PORT}/ui/index"
-HOME_URL  = f"http://127.0.0.1:{PORT}/ui/home"
+INDEX_URL = f"http://127.0.0.1:{PORT}/UI/index"
+HOME_URL  = f"http://127.0.0.1:{PORT}/UI/dashboard"
 
 print("DEBUG AUTH0:", {"domain": cfg.domain, "client_id": cfg.client_id, "redirect": cfg.redirect_uri})
 print("DEBUG WEBVIEW2 USER DATA:", USER_DATA_DIR)
@@ -58,15 +58,15 @@ print("DEBUG WEBVIEW2 USER DATA:", USER_DATA_DIR)
 # ---------- Flask ----------
 app = Flask(__name__)
 
-@app.get("/ui/index")
+@app.get("/UI/index")
 def ui_index():
     return send_file(UI_DIR / "index.html")
 
-@app.get("/ui/home")
+@app.get("/UI/home")
 def ui_home():
     return send_file(UI_DIR / "home.html")
 
-@app.get("/ui/dashboard")
+@app.get("/UI/dashboard")
 def ui_dashboard():
     p = UI_DIR / "dashboard.html"
     return send_file(p) if p.exists() else ("<h1>Make UI/dashboard.html</h1>", 200)
@@ -230,6 +230,76 @@ catch(e) {{ window.location = {INDEX_URL!r}; }}
 </script>"""
     resp = make_response(html); resp.headers["Cache-Control"] = "no-store"; return resp
 
+# --- Session storage (server-side JSON file by user) ---
+import uuid, json
+DATA_DIR = (APP_DIR / "data"); DATA_DIR.mkdir(exist_ok=True)
+SESS_PATH = DATA_DIR / "sessions.json"
+
+def _load_all_sessions():
+    if not SESS_PATH.exists(): return {}
+    try: return json.loads(SESS_PATH.read_text(encoding="utf-8"))
+    except: return {}
+
+def _save_all_sessions(data: dict):
+    SESS_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+def _user_id():
+    # use Auth0 sub for per-user partitioning
+    return (state.profile or {}).get("sub") or "anon"
+
+@app.get("/api/sessions")
+def api_list_sessions():
+    data = _load_all_sessions()
+    uid = _user_id()
+    sessions = data.get(uid, [])
+    # newest first
+    sessions = sorted(sessions, key=lambda s: s.get("startedAt",""), reverse=True)
+    lim = int(request.args.get("limit", "100"))
+    return jsonify({"sessions": sessions[:lim]})
+
+@app.post("/api/sessions")
+def api_add_session():
+    if not state.logged_in:
+        return jsonify({"ok": False, "error": "not_logged_in"}), 401
+    body = request.get_json(silent=True) or {}
+    seconds = int(body.get("seconds", 0))
+    startedAt = body.get("startedAt") or None
+    settings = body.get("settings") or {}
+    if seconds <= 0:
+        return jsonify({"ok": False, "error": "invalid_seconds"}), 400
+
+    now_iso = __import__("datetime").datetime.utcnow().isoformat() + "Z"
+    sess = {
+        "id": str(uuid.uuid4()),
+        "startedAt": startedAt or now_iso,
+        "seconds": seconds,
+        "settings": settings
+    }
+    data = _load_all_sessions()
+    uid = _user_id()
+    data.setdefault(uid, []).append(sess)
+    _save_all_sessions(data)
+    return jsonify({"ok": True, "session": sess})
+
+@app.delete("/api/sessions/<sid>")
+def api_del_session(sid):
+    data = _load_all_sessions()
+    uid = _user_id()
+    arr = data.get(uid, [])
+    new_arr = [s for s in arr if s.get("id") != sid]
+    data[uid] = new_arr
+    _save_all_sessions(data)
+    return jsonify({"ok": True, "count": len(arr) - len(new_arr)})
+
+@app.delete("/api/sessions")
+def api_clear_sessions():
+    data = _load_all_sessions()
+    uid = _user_id()
+    data[uid] = []
+    _save_all_sessions(data)
+    return jsonify({"ok": True})
+
+
 def run_flask():
     app.run(host="127.0.0.1", port=PORT, debug=False)
 
@@ -238,8 +308,8 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     MAIN_WIN = webview.create_window(
         title="Straight Up",
-        url=f"http://127.0.0.1:{PORT}/ui/index",
+        url=f"http://127.0.0.1:{PORT}/UI/index",
         width=520, height=700,
         resizable=True, min_size=(420, 560),
     )
-    webview.start(gui='edgechromium', debug=True)
+    webview.start()

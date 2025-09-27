@@ -2,41 +2,71 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Straight Up — Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Straight Up — Settings</title>
   <style>
-    :root {
-      --bg:#0B0F17; --card:#111827; --muted:#9AA4B2; --border:#273047;
-      --btn:#273047; --accent:#4F46E5; --danger:#ef4444;
+    :root{
+      --bg:#0B0F17; --card:#111827; --panel:#0F1626; --muted:#9AA4B2; --border:#273047;
+      --accent:#4F46E5; --danger:#ef4444; --ink:#fff; --shadow:0 10px 30px rgba(0,0,0,.35);
+      --toggle-off:#1f2937; --toggle-on:#14532d; --toggle-ring:rgba(34,197,94,.18);
     }
-    * { box-sizing: border-box; }
-    body { margin:0; min-height:100vh; background:var(--bg); color:#fff; font-family:system-ui, sans-serif; }
-    .shell { max-width:720px; margin:0 auto; padding:20px; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
-    .appname { font-weight:700; }
-    .ghost { background:transparent; border:1px solid var(--border); color:#fff; border-radius:10px; padding:8px 12px; cursor:pointer; }
-    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; }
-    h1 { margin:0 0 8px; font-size:22px; }
-    .muted { color:var(--muted); margin:0 0 16px; }
-    .grid { display:grid; grid-template-columns:1fr 2fr; gap:10px 14px; align-items:center; }
-    label { color:#cbd5e1; font-size:14px; }
-    input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:#0F1626; color:#fff; }
-    .ro { opacity:.8; }
-    .row { margin-top:14px; display:flex; gap:10px; flex-wrap:wrap; }
-    .btn { border:0; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
-    .primary { background:var(--accent); color:#fff; }
-    .danger { background:var(--danger); color:#fff; margin-left:auto; }
-    .footer { margin-top:18px; text-align:center; color:var(--muted); font-size:12px; }
-    .toast { margin-left:8px; color:#9AE6B4; font-weight:600; display:none; }
-    .error { color:#fecaca; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; background:var(--bg); color:var(--ink); font-family:system-ui; display:flex}
+    .shell{flex:1; max-width:1000px; margin:0 auto; padding:clamp(16px,2vw,24px); display:flex; flex-direction:column; gap:14px}
+    .topbar{display:flex; align-items:center; justify-content:space-between}
+    .ghost{background:transparent; border:1px solid var(--border); color:#fff; border-radius:10px; padding:8px 12px; cursor:pointer}
+    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:var(--shadow)}
+    h1{margin:0 0 8px; font-size:clamp(20px,3vw,24px)}
+    h2{margin:0 0 10px; font-size:18px}
+    .muted{color:var(--muted); margin:0 0 16px}
+    .grid{display:grid; grid-template-columns:1fr 2fr; gap:10px 14px; align-items:center}
+    @media (max-width:700px){ .grid{grid-template-columns:1fr} }
+    label{color:#cbd5e1; font-size:14px}
+    input[type="text"], input[readonly], select{
+      width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--panel); color:#fff
+    }
+    .row{margin-top:14px; display:flex; gap:10px; flex-wrap:wrap}
+    .btn{border:0; border-radius:10px; padding:10px 14px; font-weight:700; cursor:pointer}
+    .primary{background:var(--accent); color:#fff}
+    .danger{background:var(--danger); color:#fff; margin-left:auto}
+    .toast{margin-left:8px; color:#9AE6B4; font-weight:700; display:none}
+    .error{color:#fecaca}
+
+    /* iOS-style green toggle shared by all boolean settings */
+    .toggle{
+      --w:56px; --h:30px; --r:15px;
+      position:relative; width:var(--w); height:var(--h);
+      border-radius:var(--r); border:1px solid var(--border);
+      background:var(--toggle-off); cursor:pointer; transition:.2s;
+      display:inline-block; vertical-align:middle; outline:none;
+      box-shadow:0 0 0 0 rgba(0,0,0,0);
+    }
+    .toggle:after{
+      content:""; position:absolute; top:2px; left:2px; width:26px; height:26px; border-radius:50%;
+      background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.3); transition:transform .2s;
+    }
+    .toggle.on{ background:var(--toggle-on); border-color:#16a34a; box-shadow:0 0 0 3px var(--toggle-ring) inset; }
+    .toggle.on:after{ transform:translateX(26px); }
+    .switch{display:flex; align-items:center; gap:10px}
+    .hint{font-size:12px; color:var(--muted)}
+
+    /* Sliders with value bubble */
+    .sliderRow{display:flex; align-items:center; gap:10px}
+    input[type="range"]{flex:1; appearance:none; height:6px; border-radius:999px; background:#0f1626; border:1px solid var(--border)}
+    input[type="range"]::-webkit-slider-thumb{appearance:none; width:18px; height:18px; border-radius:50%; background:#22c55e; border:1px solid #14532d}
+    .bubble{min-width:64px; text-align:center; padding:6px 10px; border:1px solid var(--border); background:var(--panel); border-radius:999px}
+    .inlineNote{margin-top:8px}
   </style>
 </head>
 <body>
   <div class="shell">
     <div class="topbar">
-      <div class="appname">Straight Up</div>
+      <div class="appname">Straight Up — Settings</div>
       <button id="btnDashboard" class="ghost">Dashboard</button>
     </div>
 
+    <!-- Profile --------------------------------------------------------->
     <div class="card">
       <h1>Your Profile</h1>
       <p class="muted">Edit your display name. Email is managed by Auth0.</p>
@@ -44,92 +74,274 @@
       <div class="grid">
         <label for="name">Name</label>
         <input id="name" placeholder="Your name" />
-
         <label for="email">Email</label>
-        <input id="email" class="ro" readonly />
+        <input id="email" readonly />
       </div>
 
       <div class="row">
-        <button id="btnSave" class="btn primary">Save changes</button>
-        <span id="saveToast" class="toast">Saved ✓</span>
+        <button id="btnSaveProfile" class="btn primary">Save changes</button>
+        <span id="toastProfile" class="toast">Saved ✓</span>
         <button id="btnSignout" class="btn danger">Sign out</button>
       </div>
     </div>
 
-    <div class="footer">Need more settings? The dashboard is in the top-right.</div>
+    <!-- Goals & Nudges --------------------------------------------------->
+    <div class="card">
+      <h2>Goals & Nudges</h2>
+      <p class="muted">Set your daily target and choose if we chime on alerts.</p>
+
+      <div class="grid">
+        <!-- Daily goal: SLIDER -->
+        <label for="dailyGoal">Daily goal (minutes)</label>
+        <div class="sliderRow">
+          <input id="dailyGoal" type="range" min="10" max="240" step="5" />
+          <div class="bubble"><span id="dailyGoalOut">45</span> min</div>
+        </div>
+
+        <!-- Alert sound: green TOGGLE -->
+        <label>Alert sound</label>
+        <div class="switch">
+          <div id="soundOn" class="toggle on" role="switch" tabindex="0" aria-checked="true" title="On"></div>
+          <span class="hint">Play a short chime when we flag distractions/breaks.</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnSaveGoals" class="btn primary">Save goals</button>
+        <button id="btnDefaultsGoals" class="btn">Restore defaults</button>
+        <span id="toastGoals" class="toast">Saved ✓</span>
+      </div>
+    </div>
+
+    <!-- Session Defaults ------------------------------------------------->
+    <div class="card">
+      <h2>Session defaults</h2>
+      <p class="muted">Defaults used when you open session setup on the dashboard.</p>
+
+      <div class="grid">
+        <!-- Break frequency: SLIDER -->
+        <label for="defBreakEvery">Break frequency (minutes)</label>
+        <div class="sliderRow">
+          <input id="defBreakEvery" type="range" min="1" max="90" step="5" />
+          <div class="bubble"><span id="defBreakEveryOut">45</span> min</div>
+        </div>
+
+        <!-- Break length: SELECT (kept simple for clarity) -->
+        <label for="defBreakLen">Break length (minutes)</label>
+        <select id="defBreakLen">
+          <option value="3">3</option>
+          <option value="5">5</option>
+          <option value="10">10</option>
+        </select>
+
+        <!-- Distraction tracking default: green TOGGLE -->
+        <label>Distraction tracking (default)</label>
+        <div class="switch">
+          <div id="defDistractions" class="toggle on" role="switch" tabindex="0" aria-checked="true" title="On"></div>
+          <span class="hint">If on, new sessions start with distraction checks enabled.</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnSaveDefaults" class="btn primary">Save defaults</button>
+        <button id="btnDefaultsSession" class="btn">Restore defaults</button>
+        <span id="toastDefaults" class="toast">Saved ✓</span>
+      </div>
+
+      <p class="muted inlineNote">
+    <!-- Integration note: The dashboard should read these values on load and seed the session
+        setup controls. No behavior change here—just centralizing the config.
+    -->
+      </p>
+    </div>
   </div>
 
-  <script>
-    const ORIGIN = location.origin; // http://127.0.0.1:8765
+<script>
+/* =======================================================================
+   SETTINGS PAGE (backend-friendly)
+   - Profile: GET/POST /profile
+   - Settings: GET/POST /api/settings (user-scoped)
+   ----------------------------------------------------------------------- */
 
-    async function loadProfile() {
-      try {
-        const r = await fetch(`${ORIGIN}/profile`, { cache: 'no-store' });
-        const j = await r.json();
-        if (!j.logged_in) {
-          location.href = `${ORIGIN}/ui/index`;
-          return;
-        }
-        const p = j.profile || {};
-        document.getElementById('name').value  = p.name  || '';
-        document.getElementById('email').value = p.email || '';
-      } catch (e) {
-        console.error(e);
-      }
-    }
+const ORIGIN = location.origin;
 
-    async function saveProfile() {
-      const btn = document.getElementById('btnSave');
-      const toast = document.getElementById('saveToast');
-      const name = document.getElementById('name').value.trim();
+/* ---------- Canonical defaults (single source of truth) ---------------- */
+const DEFAULT_SETTINGS = {
+  dailyGoal: 45,          // minutes (10..240)
+  soundOn: true,          // chime for alerts
+  defBreakEvery: 45,      // minutes (15..90)
+  defBreakLen: 5,         // 3|5|10
+  defDistractions: true   // new session starts with distraction tracking ON
+};
 
-      btn.disabled = true;
-      const oldText = btn.textContent;
-      btn.textContent = 'Saving…';
-      toast.style.display = 'none';
-      toast.classList.remove('error');
+let SETTINGS = { ...DEFAULT_SETTINGS };
 
-      try {
-        const r = await fetch(`${ORIGIN}/profile`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name })
-        });
-        const j = await r.json();
-        if (j.ok) {
-          toast.textContent = 'Saved ✓';
-          toast.style.display = 'inline';
-        } else {
-          toast.textContent = 'Error';
-          toast.classList.add('error');
-          toast.style.display = 'inline';
-        }
-      } catch {
-        toast.textContent = 'Error';
-        toast.classList.add('error');
-        toast.style.display = 'inline';
-      } finally {
-        btn.disabled = false;
-        btn.textContent = oldText;
-        setTimeout(() => (toast.style.display = 'none'), 1200);
-      }
-    }
-
-    document.getElementById('btnSave').onclick = saveProfile;
-    document.getElementById('name').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') saveProfile();
+/* ============================== Profile ================================= */
+async function loadProfile(){
+  const r = await fetch(`${ORIGIN}/profile`, {cache:'no-store'});
+  const j = await r.json();
+  if (!j.logged_in){ location.href = `${ORIGIN}/UI/index`; return; }
+  const p = j.profile || {};
+  document.getElementById('name').value  = p.name  || '';
+  document.getElementById('email').value = p.email || '';
+}
+async function saveProfile(){
+  const btn=document.getElementById('btnSaveProfile'), toast=document.getElementById('toastProfile');
+  btn.disabled=true; const old=btn.textContent; btn.textContent='Saving…'; toast.style.display='none'; toast.classList.remove('error');
+  try{
+    const r = await fetch(`${ORIGIN}/profile`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:document.getElementById('name').value.trim()})
     });
+    const j = await r.json();
+    if (j.ok){ toast.textContent='Saved ✓'; toast.style.display='inline'; } else throw 0;
+  }catch{
+    toast.textContent='Error'; toast.classList.add('error'); toast.style.display='inline';
+  }finally{
+    btn.disabled=false; btn.textContent=old; setTimeout(()=> toast.style.display='none', 1200);
+  }
+}
 
-    // No JS bridge: just hit the route that logs out and redirects back to /ui/index
-    document.getElementById('btnSignout').onclick = () => {
-      location.href = `${ORIGIN}/logout`;
-    };
+/* ============================== Settings API ============================
 
-    document.getElementById('btnDashboard').onclick = () => {
-      location.href = `${ORIGIN}/ui/dashboard`;
-    };
+  Suggested contract:
 
-    window.addEventListener('DOMContentLoaded', loadProfile);
-  </script>
+  GET  /api/settings
+  -> { ok:true, settings:{ dailyGoal, soundOn, defBreakEvery, defBreakLen, defDistractions } }
+
+  POST /api/settings
+  body: { dailyGoal, soundOn, defBreakEvery, defBreakLen, defDistractions }
+  -> { ok:true }
+
+  Server: store per user (Auth0 `sub`), merge & validate ranges.
+
+======================================================================== */
+async function loadSettings(){
+  try{
+    const r = await fetch(`${ORIGIN}/api/settings`, {cache:'no-store'});
+    const j = await r.json();
+    if (j && j.settings){ SETTINGS = { ...DEFAULT_SETTINGS, ...j.settings }; }
+  }catch{ /* fall back to defaults if GET fails */ }
+
+  // Reflect into UI
+  el('dailyGoal').value = clamp(SETTINGS.dailyGoal, 10, 240);
+  el('dailyGoalOut').textContent = el('dailyGoal').value;
+
+  el('defBreakEvery').value = clamp(SETTINGS.defBreakEvery, 15, 90);
+  el('defBreakEveryOut').textContent = el('defBreakEvery').value;
+
+  el('defBreakLen').value = SETTINGS.defBreakLen;
+
+  setToggle('soundOn', !!SETTINGS.soundOn);
+  setToggle('defDistractions', !!SETTINGS.defDistractions);
+}
+
+/* ============================== UI helpers ============================= */
+function el(id){ return document.getElementById(id); }
+function clamp(v,min,max){ v = Number(v); if (Number.isNaN(v)) return min; return Math.min(max, Math.max(min, v)); }
+
+/* Toggle component: programmatic set & read */
+function setToggle(id, on){
+  const t = el(id);
+  t.classList.toggle('on', !!on);
+  t.setAttribute('aria-checked', on ? 'true' : 'false');
+  t.title = on ? 'On' : 'Off';
+}
+function readToggle(id){
+  return el(id).classList.contains('on');
+}
+/* Keyboard & click behavior for both toggles */
+function wireToggle(id){
+  const t = el(id);
+  t.addEventListener('click', ()=> setToggle(id, !readToggle(id)));
+  t.addEventListener('keydown', (e)=>{ if (e.key===' '||e.key==='Enter'){ e.preventDefault(); setToggle(id, !readToggle(id)); }});
+}
+
+/* Sliders → live bubbles */
+function wireSlider(rangeId, outId){
+  const r = el(rangeId), out = el(outId);
+  const update = ()=>{ out.textContent = r.value; };
+  r.addEventListener('input', update);
+  r.addEventListener('change', update);
+  update();
+}
+
+/* ============================== Save flows ============================= */
+async function saveSettings(partial, toastId, btnId){
+  const btn = el(btnId), toast = el(toastId);
+  btn.disabled = true; const old=btn.textContent; btn.textContent='Saving…';
+  toast.style.display='none'; toast.classList.remove('error');
+  try{
+    const next = { ...SETTINGS, ...partial };
+    // Ensure valid ranges before sending
+    next.dailyGoal = clamp(next.dailyGoal, 10, 240);
+    next.defBreakEvery = clamp(next.defBreakEvery, 15, 90);
+    next.defBreakLen = Number(next.defBreakLen);
+    next.soundOn = !!next.soundOn;
+    next.defDistractions = !!next.defDistractions;
+
+    const r = await fetch(`${ORIGIN}/api/settings`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(next)
+    });
+    const j = await r.json();
+    if (!j || j.ok !== true) throw 0;
+    SETTINGS = next;
+    toast.textContent='Saved ✓'; toast.style.display='inline';
+  }catch{
+    toast.textContent='Error'; toast.classList.add('error'); toast.style.display='inline';
+  }finally{
+    btn.disabled=false; btn.textContent=old; setTimeout(()=> toast.style.display='none', 1200);
+  }
+}
+
+/* Read current UI into partials */
+function readGoalsFromUI(){
+  return {
+    dailyGoal: Number(el('dailyGoal').value),
+    soundOn: readToggle('soundOn')
+  };
+}
+function readDefaultsFromUI(){
+  return {
+    defBreakEvery: Number(el('defBreakEvery').value),
+    defBreakLen: Number(el('defBreakLen').value),
+    defDistractions: readToggle('defDistractions')
+  };
+}
+
+/* ============================== Wiring ================================= */
+document.getElementById('btnSaveProfile').onclick = saveProfile;
+document.getElementById('btnSignout').onclick = ()=> location.href = `${ORIGIN}/logout`;
+document.getElementById('btnDashboard').onclick = ()=> location.href = `${ORIGIN}/UI/dashboard`;
+
+/* Sliders */
+wireSlider('dailyGoal','dailyGoalOut');
+wireSlider('defBreakEvery','defBreakEveryOut');
+
+/* Toggles */
+wireToggle('soundOn');
+wireToggle('defDistractions');
+
+/* Save buttons */
+document.getElementById('btnSaveGoals').onclick    = ()=> saveSettings(readGoalsFromUI(), 'toastGoals', 'btnSaveGoals');
+document.getElementById('btnSaveDefaults').onclick = ()=> saveSettings(readDefaultsFromUI(), 'toastDefaults', 'btnSaveDefaults');
+
+/* Restore defaults (per-section) — also updates bubbles/toggles */
+document.getElementById('btnDefaultsGoals').onclick = ()=>{
+  el('dailyGoal').value = DEFAULT_SETTINGS.dailyGoal; el('dailyGoalOut').textContent = DEFAULT_SETTINGS.dailyGoal;
+  setToggle('soundOn', DEFAULT_SETTINGS.soundOn);
+};
+document.getElementById('btnDefaultsSession').onclick = ()=>{
+  el('defBreakEvery').value = DEFAULT_SETTINGS.defBreakEvery; el('defBreakEveryOut').textContent = DEFAULT_SETTINGS.defBreakEvery;
+  el('defBreakLen').value   = DEFAULT_SETTINGS.defBreakLen;
+  setToggle('defDistractions', DEFAULT_SETTINGS.defDistractions);
+};
+
+/* ============================== Init ==================================== */
+window.addEventListener('DOMContentLoaded', async ()=>{
+  await loadProfile();
+  await loadSettings();
+});
+</script>
 </body>
 </html>

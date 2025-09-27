@@ -1,27 +1,535 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Straight Up — Dashboard</title>
-  <style>
-    body{background:#0B0F17;color:#fff;font-family:system-ui;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center}
-    .wrap{max-width:720px;width:92%;padding:20px}
-    #card{background:#111827;border:1px solid #273047;border-radius:14px;padding:20px}
-    h1{margin:0 0 8px}
-    p{color:#9AA4B2}
-    .row{margin-top:14px;display:flex;gap:10px}
-    .btn{padding:10px 14px;border-radius:10px;border:0;font-weight:600;cursor:pointer;background:#273047;color:#fff}
-  </style>
+<meta charset="utf-8" />
+<title>Straight Up — Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{
+    --bg:#0B0F17; --card:#111827; --muted:#9AA4B2; --border:#273047;
+    --ink:#fff; --accent:#4F46E5; --accent2:#22C55E; --danger:#ef4444; --warn:#f59e0b; --panel:#0F1626;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--ink);
+    background:
+      radial-gradient(1200px 800px at 80% -20%, rgba(79,70,229,.18), transparent 60%),
+      radial-gradient(1000px 700px at -10% 120%, rgba(34,197,94,.12), transparent 60%),
+      var(--bg);
+    font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  a{color:inherit}
+
+  .shell{width:100%; margin:0; padding:clamp(14px,2vw,26px)}
+
+  .topbar{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px}
+  .brand{display:flex; align-items:center; gap:12px}
+  .logo{width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg,var(--accent),var(--accent2)); display:grid; place-items:center; box-shadow:var(--shadow)}
+  .logo svg{opacity:.95}
+  .title{font-weight:800; letter-spacing:.2px}
+  .row{display:flex; gap:10px; flex-wrap:wrap}
+  .ghost{background:transparent; border:1px solid var(--border); color:var(--ink); border-radius:10px; padding:9px 12px; cursor:pointer}
+  .danger{background:var(--danger); color:#fff; border:0; border-radius:10px; padding:10px 14px; cursor:pointer}
+
+  /* Badges */
+  .incentives{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(240px,1fr));
+    gap:12px; margin-bottom:16px
+  }
+  .badge{
+    border-radius:14px; padding:14px; display:flex; gap:10px; align-items:center; border:1px solid var(--border);
+    background:linear-gradient(135deg, rgba(99,102,241,.18), rgba(34,197,94,.14));
+  }
+  .badge .icon{width:36px; height:36px; border-radius:10px; display:grid; place-items:center;
+    background:linear-gradient(135deg, rgba(99,102,241,.6), rgba(34,197,94,.6))}
+  .badge .h{font-weight:800}
+  .badge .s{font-size:12px; color:var(--muted)}
+
+  /* Main two-column area */
+  .grid{
+    display:grid;
+    grid-template-columns: 1.6fr 1.4fr; /* Session | Wellness */
+    gap:16px; align-items:start; min-height:0
+  }
+  @media (max-width:1100px){ .grid{grid-template-columns:1fr} }
+
+  .card{
+    background:rgba(17,24,39,.92); backdrop-filter:saturate(120%) blur(3px);
+    border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:var(--shadow); min-height:0; display:flex; flex-direction:column
+  }
+  .card h2{margin:0 0 10px; font-size:18px; letter-spacing:.2px}
+
+  /* Welcome name above Session */
+  .welcome{font-size:clamp(18px,2.4vw,24px); font-weight:800; margin:0 0 6px}
+
+  /* Session */
+  .timer{
+    display:flex; align-items:center; justify-content:center;
+    font-size:clamp(32px,8vw,60px); font-weight:800; letter-spacing:.5px; padding:18px 8px;
+    background:linear-gradient(180deg, transparent, rgba(79,70,229,.12));
+    border-radius:14px; border:1px dashed #2a3350; margin:8px 0 10px; text-align:center; white-space:nowrap; overflow:hidden
+  }
+  .pill{padding:10px 14px; border-radius:999px; border:1px solid var(--border); background:var(--panel)}
+  .status-dot{width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; background:#22c55e}
+  .list{display:flex; flex-direction:column; gap:10px; margin-top:6px; overflow:auto}
+  .item{display:flex; justify-content:space-between; align-items:center; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px}
+  .item .when{color:var(--muted); font-size:12px}
+
+  /* Wellness */
+  .report{display:grid; gap:12px; grid-template-columns:1fr 1fr}
+  @media (max-width:720px){ .report{grid-template-columns:1fr} }
+  .metric{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px}
+  .metric .h{font-weight:800; margin-bottom:6px}
+  .bar{height:12px; border-radius:999px; overflow:hidden; border:1px solid #223055; background:#0c1220}
+  .bar>div{height:100%; width:0%; background:linear-gradient(90deg,#ef4444,#f59e0b 45%,#22C55E); transition:width .35s ease}
+
+  /* Slide-over */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,.45); display:none}
+  .panel{position:fixed; top:0; right:0; width:420px; max-width:100%; height:100%;
+         background:var(--card); border-left:1px solid var(--border); transform:translateX(100%);
+         transition:transform .25s ease; box-shadow:var(--shadow); padding:18px}
+  .panel.open{transform:translateX(0)}
+  .overlay.show{display:block}
+  .field{margin:10px 0}
+  .field label{display:block; color:#d1d5db; margin-bottom:6px}
+  .field input, .field select{width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:#0F1626; color:#fff}
+  .videoBox{background:#0F1626; border:1px solid var(--border); border-radius:12px; overflow:hidden; aspect-ratio:16/10; display:grid; place-items:center}
+  video{width:100%; height:100%; object-fit:cover; background:#000}
+  .hint{font-size:12px; color:#9AA4B2}
+
+  /* iOS toggle */
+  .ios{--w:50px; --h:28px; --r:14px; width:var(--w); height:var(--h); border-radius:var(--r); position:relative; cursor:pointer; background:#1f2937; border:1px solid var(--border); transition:.2s}
+  .ios::after{content:""; position:absolute; top:2px; left:2px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.3); transition:transform .2s}
+  .ios.on{ background:#334155 } .ios.on::after{ transform:translateX(22px) }
+
+  .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#0F1626; color:#fff; border:1px solid var(--border); border-radius:999px; padding:10px 14px; display:none; box-shadow:var(--shadow)}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <div id="card">
-      <h1>Dashboard</h1>
-      <p>Put posture stats, timers, and shortcuts here.</p>
+  <div class="shell">
+    <!-- Top bar (no name here) -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M4 17l8-12 8 12" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 17h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="title">Straight Up</div>
+      </div>
       <div class="row">
-        <button class="btn" onclick="location.href='http://127.0.0.1:8765/ui/home'">Back to Profile</button>
+        <button class="ghost" id="btnHome">Settings</button>
+        <button class="danger" id="btnSignout">Sign out</button>
       </div>
     </div>
+
+    <!-- Badges (Level first) -->
+    <div class="incentives">
+      <div class="badge" style="background:linear-gradient(135deg, rgba(34,197,94,.2), rgba(99,102,241,.14))">
+        <div class="icon">🏅</div>
+        <div><div class="h" id="bLevel">Lv. 1 — Starter</div><div class="s" id="bNext">Next: 80 min total</div></div>
+      </div>
+      <div class="badge">
+        <div class="icon">🔥</div>
+        <div><div class="h" id="bStreak">0-day streak</div><div class="s">Keep it going!</div></div>
+      </div>
+      <div class="badge" style="background:linear-gradient(135deg, rgba(99,102,241,.2), rgba(34,197,94,.1))">
+        <div class="icon">⏱️</div>
+        <div><div class="h" id="bToday">0 min today</div><div class="s">Consistency beats intensity</div></div>
+      </div>
+      <div class="badge" style="background:linear-gradient(135deg, rgba(250,204,21,.2), rgba(79,70,229,.12))">
+        <div class="icon">🎯</div>
+        <div><div class="h" id="bGoal">Daily goal: 45 min</div><div class="s">Adjust in setup</div></div>
+      </div>
+    </div>
+
+    <!-- Two columns: Session | Wellness -->
+    <div class="grid">
+      <!-- Session -->
+      <section class="card" id="sessionCard">
+        <!-- Moved name here -->
+        <div id="welcomeName" class="welcome">Welcome back</div>
+
+        <h2 id="sessionTitle">Session</h2>
+        <div class="muted" id="sessionSub">Configure your session, then start. We’ll time it and track progress.</div>
+
+        <div class="timer"><span id="clock">00:00</span></div>
+        <div class="row" style="margin-bottom:10px">
+          <button class="ghost" id="btnOpenSetup">Open session setup</button>
+          <button class="ghost" id="btnPause" disabled>Pause</button>
+          <button class="ghost" id="btnStop" disabled>Stop & Save</button>
+          <span class="pill"><span class="status-dot" id="dot"></span><span id="status">Idle</span></span>
+        </div>
+
+        <h2 style="margin-top:8px">Today</h2>
+        <div class="list" id="todayList"></div>
+
+        <h2 style="margin-top:8px">Recent sessions</h2>
+        <div class="list" id="recentList"></div>
+      </section>
+
+      <!-- Wellness -->
+      <section class="card">
+        <h2>Wellness report</h2>
+        <div class="muted">Snapshot of posture, focus, distractions, and break habits.</div>
+
+        <div class="report" style="margin-top:8px">
+          <div class="metric">
+            <div class="h">Distraction level <span id="distPct" class="muted" style="float:right">—</span></div>
+            <div class="bar"><div id="distBar"></div></div>
+            <div class="muted" id="distHint" style="margin-top:6px">Lower is better.</div>
+          </div>
+          <div class="metric">
+            <div class="h">Focus score <span id="focusPct" class="muted" style="float:right">—</span></div>
+            <div class="bar"><div id="focusBar"></div></div>
+            <div class="muted" id="focusHint" style="margin-top:6px">Sustained work time.</div>
+          </div>
+          <div class="metric">
+            <div class="h">Posture score <span id="postPct" class="muted" style="float:right">—</span></div>
+            <div class="bar"><div id="postBar"></div></div>
+            <div class="muted" id="postHint" style="margin-top:6px">Neck and shoulder alignment.</div>
+          </div>
+          <div class="metric">
+            <div class="h">Break adherence <span id="breakPct" class="muted" style="float:right">—</span></div>
+            <div class="bar"><div id="breakBar"></div></div>
+            <div class="muted" id="breakHint" style="margin-top:6px">Short, regular breaks.</div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
+
+  <!-- Setup panel -->
+  <div class="overlay" id="overlay"></div>
+  <aside class="panel" id="setup" aria-label="Session setup panel" aria-hidden="true">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin:0">Session setup</h2>
+      <button class="ghost" id="btnCloseSetup">Close</button>
+    </div>
+
+    <div class="videoBox"><video id="cam" autoplay muted playsinline></video></div>
+    <div class="hint" style="margin-top:6px">Webcam preview (used for posture & distraction checks).</div>
+
+    <div class="field">
+      <label for="breakEvery">Break frequency (minutes)</label>
+      <select id="breakEvery">
+        <option value="25">25</option>
+        <option value="45" selected>45</option>
+        <option value="50">50</option>
+        <option value="60">60</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="breakLen">Break length (minutes)</label>
+      <select id="breakLen">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Distraction tracking</label>
+      <div id="iosToggle" class="ios on" role="switch" aria-checked="true" tabindex="0" title="On"></div>
+      <div class="hint">We’ll alert you if we detect prolonged phone usage.</div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <button class="ghost" id="btnStart">Start session</button>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast">Saved</div>
+
+<script>
+/* ----------------------- Config & Public Hooks ------------------------ */
+var ORIGIN = location.origin;
+
+var Metrics = { distractionLevelPct:0, focusScorePct:0, postureScorePct:0, breakAdherencePct:0 };
+var SessionInsights = { microBreaks:0, slouchEvents:0, offScreenTimeSec:0 };
+
+window.updatePostureMetrics = function(o){
+  if (!o) return;
+  if (typeof o.distractionLevelPct === "number") Metrics.distractionLevelPct = o.distractionLevelPct;
+  if (typeof o.focusScorePct === "number")        Metrics.focusScorePct      = o.focusScorePct;
+  if (typeof o.postureScorePct === "number")      Metrics.postureScorePct    = o.postureScorePct;
+  if (typeof o.breakAdherencePct === "number")    Metrics.breakAdherencePct  = o.breakAdherencePct;
+  renderWellnessFromMetrics();
+};
+window.updateSessionInsights = function(o){
+  if (!o) return;
+  if (typeof o.microBreaks      === "number") SessionInsights.microBreaks = o.microBreaks;
+  if (typeof o.slouchEvents     === "number") SessionInsights.slouchEvents = o.slouchEvents;
+  if (typeof o.offScreenTimeSec === "number") SessionInsights.offScreenTimeSec = o.offScreenTimeSec;
+};
+
+/* ----------------------- Auth name (now above Session) ---------------- */
+function loadProfileTopbar(){
+  return fetch(ORIGIN + "/profile", {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if (!j.logged_in){ location.href = ORIGIN + "/UI/index"; return; }
+      var p = j.profile || {};
+      var displayName = p.name || p.given_name || p.nickname || p.email || "Welcome back";
+      var el = document.getElementById("welcomeName");
+      if (el) el.textContent = displayName ? "Hi, " + displayName : "Welcome back";
+    })
+    .catch(function(){});
+}
+document.getElementById("btnSignout").onclick = function(){ location.href = ORIGIN + "/logout"; };
+document.getElementById("btnHome").onclick    = function(){ location.href = ORIGIN + "/UI/home"; };
+
+/* ----------------------- Setup panel ---------------------------------- */
+var overlay = document.getElementById("overlay");
+var setup   = document.getElementById("setup");
+var camEl   = document.getElementById("cam");
+var streamRef = null;
+
+function openSetup(){
+  overlay.classList.add("show"); setup.classList.add("open");
+  setup.setAttribute("aria-hidden","false");
+  navigator.mediaDevices.getUserMedia({video:true, audio:false})
+    .then(function(stream){ streamRef = stream; camEl.srcObject = stream; })
+    .catch(function(){});
+}
+function closeSetup(){
+  overlay.classList.remove("show"); setup.classList.remove("open");
+  setup.setAttribute("aria-hidden","true");
+  if (streamRef){ streamRef.getTracks().forEach(function(t){ t.stop(); }); streamRef=null; }
+}
+document.getElementById("btnOpenSetup").onclick = openSetup;
+document.getElementById("btnCloseSetup").onclick = closeSetup;
+overlay.onclick = closeSetup;
+
+/* ----------------------- Toggle -------------------------------------- */
+var ios = document.getElementById("iosToggle");
+var distractionOn = true;
+function setIOS(on){
+  distractionOn = !!on;
+  ios.classList.toggle("on", distractionOn);
+  ios.setAttribute("aria-checked", distractionOn ? "true" : "false");
+}
+ios.addEventListener("click", function(){ setIOS(!distractionOn); });
+ios.addEventListener("keydown", function(e){ if (e.key===" "||e.key==="Enter"){ e.preventDefault(); setIOS(!distractionOn); }});
+
+/* ----------------------- Timer + Controls ----------------------------- */
+var running=false, paused=false, t0=0, acc=0, iv=null, currentSettings=null;
+
+function setHeader(mode){
+  var title = document.getElementById("sessionTitle");
+  var sub   = document.getElementById("sessionSub");
+  if (mode==="running"){ title.textContent="Running"; sub.textContent="Timer active. We’re tracking posture and focus."; }
+  else if (mode==="paused"){ title.textContent="Paused"; sub.textContent="Resume when you’re ready."; }
+  else { title.textContent="Session"; sub.textContent="Configure your session, then start. We’ll time it and track progress."; }
+}
+function setStatus(text, mode){
+  var dot = document.getElementById("dot");
+  document.getElementById("status").textContent = text || "Idle";
+  if (mode==="running"){ dot.style.background="#ef4444"; }
+  else if (mode==="paused"){ dot.style.background="#f59e0b"; }
+  else { dot.style.background="#22c55e"; }
+  setHeader(mode || "idle");
+}
+function fmt(v){ return v.toString().padStart(2,"0"); }
+function fmtTimer(sec){ var m=Math.floor(sec/60), s=sec%60; return fmt(m)+":"+fmt(s); }
+function tick(){ var s=acc+(paused?0:Math.floor((Date.now()-t0)/1000)); document.getElementById("clock").textContent=fmtTimer(s); }
+
+document.getElementById("btnStart").onclick = function(){
+  currentSettings = {
+    breakEvery: parseInt(document.getElementById("breakEvery").value,10),
+    breakLen:   parseInt(document.getElementById("breakLen").value,10),
+    distractions: distractionOn
+  };
+  closeSetup();
+  running=true; paused=false; acc=0; t0=Date.now();
+  document.getElementById("btnPause").disabled=false;
+  document.getElementById("btnStop").disabled=false;
+  setStatus("Running","running");
+  iv=setInterval(function(){ tick(); },1000);
+};
+
+document.getElementById("btnPause").onclick = function(){
+  if(!running) return;
+  paused=!paused;
+  if (paused){
+    acc+=Math.floor((Date.now()-t0)/1000);
+    setStatus("Paused","paused");
+    document.getElementById("btnPause").textContent="Resume";
+  }else{
+    t0=Date.now();
+    setStatus("Running","running");
+    document.getElementById("btnPause").textContent="Pause";
+  }
+};
+
+document.getElementById("btnStop").onclick = function(){
+  if(!running) return;
+  clearInterval(iv);
+  var elapsed = acc + (paused ? 0 : Math.floor((Date.now()-t0)/1000));
+  running=false; paused=false; acc=0;
+  document.getElementById("btnPause").disabled=true;
+  document.getElementById("btnStop").disabled=true;
+  document.getElementById("btnPause").textContent="Pause";
+  setStatus("Idle","idle"); document.getElementById("clock").textContent="00:00";
+
+  if (elapsed < 60){ toast("Session too short (<1 min)"); return; }
+
+  fetch(ORIGIN + "/api/sessions", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      seconds: elapsed,
+      settings: currentSettings || {},
+      startedAt: new Date(Date.now()-elapsed*1000).toISOString(),
+      metrics: {
+        distractionLevelPct: Metrics.distractionLevelPct,
+        focusScorePct:       Metrics.focusScorePct,
+        postureScorePct:     Metrics.postureScorePct,
+        breakAdherencePct:   Metrics.breakAdherencePct
+      },
+      insights: {
+        microBreaks:      SessionInsights.microBreaks,
+        slouchEvents:     SessionInsights.slouchEvents,
+        offScreenTimeSec: SessionInsights.offScreenTimeSec
+      }
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(j){ if(!j.ok) throw new Error("save"); toast("Session saved"); return refreshSessions(); })
+  .catch(function(){ toast("Save error"); });
+};
+
+/* ----------------------- Sessions & Badges ----------------------------- */
+function fetchSessions(){
+  return fetch(ORIGIN + "/api/sessions?limit=200", {cache:"no-store"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ return j.sessions || []; });
+}
+function ymd(d){ return d.toISOString().slice(0,10); }
+function mins(s){ return Math.round((s||0)/60); }
+
+function renderListsFrom(sessions){
+  var todayWrap  = document.getElementById("todayList");
+  var recentWrap = document.getElementById("recentList");
+  todayWrap.innerHTML = ""; recentWrap.innerHTML = "";
+  var today = ymd(new Date());
+
+  var todays = sessions.filter(function(s){ return ymd(new Date(s.startedAt)) === today; });
+  var recents = sessions.filter(function(s){ return ymd(new Date(s.startedAt)) !== today; });
+
+  function row(s){
+    var d = new Date(s.startedAt);
+    var hh = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+    var el = document.createElement("div");
+    el.className = "item";
+    var be = s.settings && s.settings.breakEvery ? s.settings.breakEvery : "-";
+    var bl = s.settings && s.settings.breakLen ? s.settings.breakLen : "-";
+    var di = s.settings && s.settings.distractions ? "on" : "off";
+    el.innerHTML =
+      '<div>' +
+        '<div><strong>' + mins(s.seconds) + ' min</strong> • ' + hh + '</div>' +
+        '<div class="when">' + d.toLocaleDateString() + '</div>' +
+      '</div>' +
+      '<div class="row">' +
+        '<button class="ghost" data-id="' + s.id + '">Details</button>' +
+        '<button class="ghost" data-del="' + s.id + '">Delete</button>' +
+      '</div>';
+    el.querySelector('[data-del]').onclick = function(){
+      if (!confirm('Delete this session?')) return;
+      fetch(ORIGIN + "/api/sessions/" + s.id, {method:"DELETE"}).then(function(){ refreshSessions(); });
+    };
+    el.querySelector('[data-id]').onclick = function(){ toast("Break " + be + "m • " + bl + "m • Distractions: " + di); };
+    return el;
+  }
+
+  (todays.length ? todays : [{id:"x"}]).forEach(function(s){
+    if (s.id==="x"){ todayWrap.innerHTML = '<div class="muted">No sessions yet today.</div>'; return; }
+    todayWrap.appendChild(row(s));
+  });
+  (recents.length ? recents : [{id:"y"}]).forEach(function(s){
+    if (s.id==="y"){ recentWrap.innerHTML = '<div class="muted">No recent sessions yet.</div>'; return; }
+    recentWrap.appendChild(row(s));
+  });
+
+  var todayMin = todays.reduce(function(a,b){ return a + mins(b.seconds); }, 0);
+  document.getElementById("bToday").textContent = todayMin + " min today";
+}
+
+function computeStreak(sessions){
+  var days=new Set(sessions.map(function(s){ return ymd(new Date(s.startedAt)); }));
+  var streak=0; for(var i=0;i<365;i++){ var d=new Date(); d.setDate(d.getDate()-i); if(days.has(ymd(d))) streak++; else break; }
+  return streak;
+}
+function sumMinutes(sessions){
+  var totalSec=sessions.reduce(function(a,b){ return a+(b.seconds||0); },0);
+  return Math.round(totalSec/60);
+}
+function levelFromMinutes(min){
+  if (min>=1500) return "Lv. 6 — Diamond";
+  if (min>=800)  return "Lv. 5 — Platinum";
+  if (min>=400)  return "Lv. 4 — Gold";
+  if (min>=150)  return "Lv. 3 — Silver";
+  if (min>=80)   return "Lv. 2 — Alloy";
+  return "Lv. 1 — Starter";
+}
+function nextGoal(min){
+  if (min<80) return 80;
+  if (min<150) return 150;
+  if (min<400) return 400;
+  if (min<800) return 800;
+  if (min<1500) return 1500;
+  return 3000;
+}
+function renderBadgesFrom(sessions){
+  var t = sumMinutes(sessions);
+  var streak = computeStreak(sessions);
+  var lvl = levelFromMinutes(t);
+  document.getElementById("bStreak").textContent = streak + "-day streak";
+  document.getElementById("bLevel").textContent = lvl;
+  document.getElementById("bNext").textContent = "Next: " + nextGoal(t) + " min total";
+}
+
+/* ----------------------- Wellness bars -------------------------------- */
+function setBar(barId, pctId, val, invert){
+  var v = Math.max(0, Math.min(100, Number(val)||0));
+  var bar = document.getElementById(barId);
+  var pct = document.getElementById(pctId);
+  if (bar) bar.style.width = v + "%";
+  if (pct) pct.textContent = (invert ? (100 - v) : v) + "%";
+}
+function renderWellnessFromMetrics(){
+  setBar("distBar","distPct", Metrics.distractionLevelPct, true);
+  setBar("focusBar","focusPct", Metrics.focusScorePct, false);
+  setBar("postBar","postPct", Metrics.postureScorePct, false);
+  setBar("breakBar","breakPct", Metrics.breakAdherencePct, false);
+}
+
+/* ----------------------- Refresh & Toast ------------------------------- */
+function refreshSessions(){
+  return fetchSessions().then(function(list){
+    renderListsFrom(list);
+    renderBadgesFrom(list);
+    renderWellnessFromMetrics();
+  });
+}
+function toast(msg){
+  var t=document.getElementById("toast");
+  t.textContent=msg; t.style.display="block";
+  setTimeout(function(){ t.style.display="none"; }, 1200);
+}
+
+/* ----------------------- Init ----------------------------------------- */
+window.addEventListener("DOMContentLoaded", function(){
+  loadProfileTopbar()
+    .then(function(){ return refreshSessions(); })
+    .then(function(){
+      // demo defaults so bars show something before backend hooks run
+      window.updatePostureMetrics({ distractionLevelPct:28, focusScorePct:64, postureScorePct:75, breakAdherencePct:62 });
+    });
+});
+</script>
 </body>
 </html>
