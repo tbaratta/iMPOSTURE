@@ -1,11 +1,12 @@
 """
-Complete Face, Hand, and Pose Detection with MediaPipe
-Real-time detection of eyes, hands, and shoulders using Google's MediaPipe
+StraightUp - Enhanced Pose Detection System
+Real-time detection with MediaPipe and YOLO11n
 
 Features:
-- Detailed eye contours and iris tracking
-- Full 21-point hand skeleton detection
-- Complete body pose with shoulder highlighting
+- Eye contours and animated iris tracking
+- Full 21-point hand skeleton with glow effects
+- Complete body pose with neck center line mapping
+- Enhanced phone detection with smooth tracking
 - Real-time webcam processing with controls
 """
 
@@ -37,17 +38,17 @@ class CompletePoseDetector:
         self.phone_detection_history = []  # For tracking and smoothing
         self.max_history = 10
         
-        # TRUE MUID-IITR parameters
-        self.enable_hand_phone_fusion = True  # Combine hand + phone detection
-        self.phone_near_hand_threshold = 100  # pixels
-        self.compound_detection_threshold = 120  # Distance for compound boxes
-        self.usage_confidence_threshold = 0.5    # Minimum usage confidence
-        self.muid_detection_history = deque(maxlen=10)  # Usage history for smoothing
+        # Enhanced phone tracking with smooth interpolation
+        self._phone_tracks = []          # Active phone tracks
+        self._next_track_id = 1
+        self.phone_smooth_alpha = 0.6    # EMA smoothing factor
+        self.phone_max_misses = 6        # Frames to keep tracks alive
         
-        print("📱 TRUE MUID-IITR phone usage detection ready!")
-        print("   ✅ Compound bounding boxes enabled")
-        print("   ✅ Usage scenario detection active")
-        print("   ✅ Hand-phone interaction analysis ready")
+        # EMA smoothing for neck center line
+        self._neck_base_smooth = None
+        self._head_pt_smooth = None
+        
+        print("📱 Enhanced phone detection with smooth tracking ready!")
         
         # Initialize models
         self.face_mesh = self.mp_face_mesh.FaceMesh(
@@ -97,39 +98,15 @@ class CompletePoseDetector:
         self.trail_points = []
         self.animation_frame = 0
         self.pulse_factor = 0
+    
+    # -------------------- Utility Functions --------------------
+    def _ema(self, prev, cur, a=0.3):
+        """Exponential Moving Average for smooth positioning"""
+        if prev is None:
+            return cur
+        return (int(a*cur[0] + (1-a)*prev[0]), int(a*cur[1] + (1-a)*prev[1]))
         
-    def draw_eye_landmarks_old(self, image, landmarks, eye_indices, iris_indices):
-        """Draw detailed eye landmarks including iris"""
-        h, w = image.shape[:2]
-        
-        # Draw eye contour
-        eye_points = []
-        for idx in eye_indices:
-            if idx < len(landmarks.landmark):
-                x = int(landmarks.landmark[idx].x * w)
-                y = int(landmarks.landmark[idx].y * h)
-                eye_points.append((x, y))
-                cv2.circle(image, (x, y), 2, self.EYE_COLOR, -1)
-        
-        # Draw eye contour line
-        if len(eye_points) > 3:
-            eye_points = np.array(eye_points, dtype=np.int32)
-            cv2.polylines(image, [eye_points], True, self.EYE_COLOR, 1)
-        
-        # Draw iris
-        iris_points = []
-        for idx in iris_indices:
-            if idx < len(landmarks.landmark):
-                x = int(landmarks.landmark[idx].x * w)
-                y = int(landmarks.landmark[idx].y * h)
-                iris_points.append((x, y))
-                cv2.circle(image, (x, y), 3, self.IRIS_COLOR, -1)
-        
-        # Draw iris circle
-        if len(iris_points) >= 4:
-            iris_center = np.mean(iris_points, axis=0).astype(int)
-            iris_radius = int(np.linalg.norm(np.array(iris_points[0]) - iris_center))
-            cv2.circle(image, tuple(iris_center), iris_radius, self.IRIS_COLOR, 2)
+
     
     def draw_shoulder_highlight(self, image, landmarks):
         """Highlight shoulders specifically"""
@@ -185,7 +162,7 @@ class CompletePoseDetector:
         cv2.circle(image, center, max(1, radius // 2), (255, 255, 255), -1)
     
     def draw_awesome_skeleton(self, image, landmarks):
-        """Draw an awesome glowing skeleton with effects"""
+        """Enhanced glowing skeleton with neck center line mapping (merged feature)"""
         h, w = image.shape[:2]
         
         # Get all landmark positions
@@ -217,6 +194,32 @@ class CompletePoseDetector:
             if start_idx < len(points) and end_idx < len(points):
                 self.draw_glow_effect(image, [points[start_idx], points[end_idx]], 
                                     leg_color, glow_leg, 3)
+        
+        # NECK LINES AND CENTER MAPPING
+        if len(points) > 12:
+            # Shoulder→Head (nose) lines
+            self.draw_glow_effect(image, [points[11], points[0]],
+                                  self.SHOULDER_COLOR, self.GLOW_SHOULDER, 3)
+            self.draw_glow_effect(image, [points[12], points[0]],
+                                  self.SHOULDER_COLOR, self.GLOW_SHOULDER, 3)
+
+            # CENTER NECK LINE: mid-shoulders -> head anchor
+            mx = int((points[11][0] + points[12][0]) / 2)
+            my = int((points[11][1] + points[12][1]) / 2)
+            neck_base_raw = (mx, my)
+            head_pt_raw = points[0]
+
+            # Apply EMA smoothing for silky smooth neck line
+            neck_base = self._ema(self._neck_base_smooth, neck_base_raw, a=0.7) if self._neck_base_smooth else neck_base_raw
+            head_pt   = self._ema(self._head_pt_smooth,   head_pt_raw,   a=0.7) if self._head_pt_smooth   else head_pt_raw
+            self._neck_base_smooth = neck_base
+            self._head_pt_smooth   = head_pt
+
+            # Draw the crisp, smooth center neck line
+            cv2.line(image, neck_base, head_pt, self.SHOULDER_COLOR, 2, lineType=cv2.LINE_AA)
+            self.draw_neon_circle(image, neck_base, 8, self.SHOULDER_COLOR, self.GLOW_SHOULDER)
+            cv2.putText(image, "NECK", (neck_base[0] - 20, neck_base[1] - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.SHOULDER_COLOR, 1)
         
         # Draw glowing joint points
         joint_indices = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]  # Major joints
@@ -309,436 +312,172 @@ class CompletePoseDetector:
             cv2.circle(image, tuple(iris_center), pulse, self.IRIS_COLOR, -1)      # Main iris
             cv2.circle(image, tuple(iris_center), max(1, pulse // 3), (255, 255, 255), -1)  # Pupil
     
-    def detect_phones_enhanced(self, image, hand_landmarks=None):
-        """Enhanced phone detection using multiple approaches"""
-        phones_detected = 0
-        phone_boxes = []
-        
-        # Method 1: COCO Dataset Detection (class 67)
+    # -------------------- Enhanced Phone Detection --------------------
+    def _iou(self, a, b):
+        """Calculate Intersection over Union for box overlap detection"""
+        ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        if ix2 <= ix1 or iy2 <= iy1:
+            return 0.0
+        inter = (ix2 - ix1) * (iy2 - iy1)
+        area_a = (ax2 - ax1) * (ay2 - ay1)
+        area_b = (bx2 - bx1) * (by2 - by1)
+        return inter / (area_a + area_b - inter + 1e-6)
+
+    def _lerp_bbox(self, a, b, alpha):
+        """Linear interpolation between two bounding boxes for smooth tracking"""
+        ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+        nx1 = int((1 - alpha) * ax1 + alpha * bx1)
+        ny1 = int((1 - alpha) * ay1 + alpha * by1)
+        nx2 = int((1 - alpha) * ax2 + alpha * bx2)
+        ny2 = int((1 - alpha) * ay2 + alpha * by2)
+        return (nx1, ny1, nx2, ny2)
+
+    def _detect_phones_all_sources(self, image, hand_landmarks=None):
+        """Enhanced phone detection with smooth tracking"""
+        dets = []
+
+        # COCO cell phone detection
         results = self.yolo_model(image, verbose=False)
-        coco_phones = self._detect_coco_phones(results, image)
-        phones_detected += len(coco_phones)
-        phone_boxes.extend(coco_phones)
-        
-        # Method 2: TRUE MUID-IITR Compound Detection
-        compound_detections = self._detect_compound_usage_boxes(image, hand_landmarks)
-        phones_detected += len(compound_detections)
-        phone_boxes.extend(compound_detections)
+        for result in results:
+            boxes = result.boxes
+            if boxes is None:
+                continue
+            for box in boxes:
+                class_id = int(box.cls)
+                conf = float(box.conf)
+                if class_id == 67 and conf > self.phone_confidence_threshold:
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    dets.append({"bbox": (x1, y1, x2, y2), "confidence": conf, "type": "COCO"})
+
+        return dets
+
+    def _update_phone_tracks_and_get_boxes(self, detections):
+        """Match detections to tracks, smooth with EMA, keep for a few misses"""
+        alpha = self.phone_smooth_alpha
+        iou_thr = 0.3
+
+        unmatched_tracks = set(range(len(self._phone_tracks)))
+
+        # Match detections to existing tracks (greedy IoU)
+        for det in detections:
+            best_iou, best_idx = 0.0, -1
+            for ti in unmatched_tracks:
+                iou = self._iou(self._phone_tracks[ti]['bbox'], det['bbox'])
+                if iou > best_iou:
+                    best_iou, best_idx = iou, ti
+            if best_iou >= iou_thr and best_idx != -1:
+                t = self._phone_tracks[best_idx]
+                t['bbox'] = self._lerp_bbox(t['bbox'], det['bbox'], alpha)
+                t['type'] = det['type']
+                t['conf'] = det['confidence']
+                t['misses'] = 0
+                unmatched_tracks.discard(best_idx)
+            else:
+                # New track
+                self._phone_tracks.append({
+                    "id": self._next_track_id,
+                    "bbox": det['bbox'],
+                    "type": det['type'],
+                    "conf": det['confidence'],
+                    "misses": 0
+                })
+                self._next_track_id += 1
+
+        # Age out unmatched tracks
+        kept = []
+        for idx, t in enumerate(self._phone_tracks):
+            if idx in unmatched_tracks:
+                t['misses'] += 1
+            if t['misses'] <= self.phone_max_misses:
+                kept.append(t)
+        self._phone_tracks = kept
+
+        # Return smoothed boxes to draw
+        return [{"bbox": t["bbox"], "confidence": t.get("conf", 0.0), "type": t.get("type", "COCO")}
+                for t in self._phone_tracks]
+
+    def _draw_enhanced_phone_detections(self, image, phone_boxes):
+        """Draw smoothed phone boxes with enhanced visualization"""
+        for phone in phone_boxes:
+            x1, y1, x2, y2 = phone['bbox']
+            conf = phone.get('confidence', 0.0)
+            det_type = phone.get('type', 'COCO')
+
+            if det_type == 'COCO':
+                color = self.PHONE_COLOR; label_prefix = "📱PHONE"
+            else:
+                color = (0, 255, 255); label_prefix = "📱OTHER"
+
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, 4)
+            cv2.rectangle(image, (x1-2, y1-2), (x2+2, y2+2), color, 1)
+            label = f"{label_prefix} {conf:.2f}"
+            sz = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            cv2.rectangle(image, (x1, y1 - sz[1] - 12), (x1 + sz[0] + 10, y1 - 2), color, -1)
+            cv2.putText(image, label, (x1 + 5, y1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+    def detect_phones_enhanced(self, image, hand_landmarks=None):
+        """Enhanced phone detection with smooth tracking (merged and simplified)"""
+        # Detect phones EVERY frame -> smooth -> draw
+        hand_lms_list = hand_landmarks if hand_landmarks else None
+        raw_phone_dets = self._detect_phones_all_sources(image, hand_lms_list)
+        smoothed_boxes = self._update_phone_tracks_and_get_boxes(raw_phone_dets)
+        self._draw_enhanced_phone_detections(image, smoothed_boxes)
+        phones_detected_now = len([t for t in self._phone_tracks if t['misses'] == 0])
         
         # Update detection history for smoothing
-        self.muid_detection_history.append(len(compound_detections))
-        
-        # Method 3: Hand-Phone Fusion (detect phones near hands)
-        if self.enable_hand_phone_fusion and hand_landmarks:
-            fusion_phones = self._detect_phones_near_hands(image, hand_landmarks, phone_boxes)
-            phones_detected += len(fusion_phones)
-            phone_boxes.extend(fusion_phones)
-        
-        # Remove duplicate detections
-        phone_boxes = self._remove_duplicate_detections(phone_boxes)
-        phones_detected = len(phone_boxes)
-        
-        # Draw all detected phones with enhanced visualization
-        self._draw_enhanced_phone_detections(image, phone_boxes)
-        
-        # Update detection history for smoothing
-        self.phone_detection_history.append(phones_detected)
+        self.phone_detection_history.append(phones_detected_now)
         if len(self.phone_detection_history) > self.max_history:
             self.phone_detection_history.pop(0)
         
-        return phones_detected
-    
-    def _detect_coco_phones(self, results, image):
-        """Detect phones using standard COCO dataset"""
-        phones = []
-        
-        for result in results:
-            boxes = result.boxes
-            if boxes is not None:
-                for box in boxes:
-                    class_id = int(box.cls)
-                    confidence = float(box.conf)
-                    
-                    # COCO cell phone detection with lower threshold
-                    if class_id == 67 and confidence > self.phone_confidence_threshold:
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        phones.append({
-                            'bbox': (x1, y1, x2, y2),
-                            'confidence': confidence,
-                            'type': 'COCO',
-                            'class_id': class_id
-                        })
-        
-        return phones
-    
-    def _detect_compound_usage_boxes(self, image, hand_landmarks):
-        """TRUE MUID-IITR: Detect compound bounding boxes for actual phone usage"""
-        if not hand_landmarks:
-            return []
-        
-        h, w = image.shape[:2]
-        
-        # Step 1: Get basic phone detections
-        results = self.yolo_model(image, verbose=False)
-        basic_phones = []
-        
-        for result in results:
-            boxes = result.boxes
-            if boxes is not None:
-                for box in boxes:
-                    class_id = int(box.cls)
-                    confidence = float(box.conf)
-                    
-                    if class_id == 67 and confidence > 0.3:  # Only cell phones
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        basic_phones.append({
-                            'bbox': (x1, y1, x2, y2),
-                            'center': ((x1 + x2) // 2, (y1 + y2) // 2),
-                            'confidence': confidence
-                        })
-        
-        # Step 2: Get hand positions from MediaPipe
-        hand_positions = []
-        for hand_lm in hand_landmarks:
-            landmarks = []
-            for landmark in hand_lm.landmark:
-                x, y = int(landmark.x * w), int(landmark.y * h)
-                landmarks.append((x, y))
-            
-            # Calculate hand center and bounding box
-            min_x = min([p[0] for p in landmarks])
-            max_x = max([p[0] for p in landmarks])
-            min_y = min([p[1] for p in landmarks])
-            max_y = max([p[1] for p in landmarks])
-            center_x = (min_x + max_x) // 2
-            center_y = (min_y + max_y) // 2
-            
-            hand_positions.append({
-                'bbox': (min_x, min_y, max_x, max_y),
-                'center': (center_x, center_y),
-                'landmarks': landmarks,
-                'fingertips': [landmarks[4], landmarks[8], landmarks[12], landmarks[16], landmarks[20]]
-            })
-        
-        # Step 3: Create compound detections (CORE MUID-IITR FEATURE)
-        compound_detections = []
-        for hand in hand_positions:
-            for phone in basic_phones:
-                distance = self._calculate_distance(hand['center'], phone['center'])
-                
-                if distance < self.compound_detection_threshold:
-                    # Create compound bounding box
-                    hand_bbox = hand['bbox']
-                    phone_bbox = phone['bbox']
-                    
-                    compound_x1 = min(hand_bbox[0], phone_bbox[0])
-                    compound_y1 = min(hand_bbox[1], phone_bbox[1])
-                    compound_x2 = max(hand_bbox[2], phone_bbox[2])
-                    compound_y2 = max(hand_bbox[3], phone_bbox[3])
-                    
-                    # Calculate usage confidence
-                    usage_confidence = self._calculate_usage_confidence(
-                        hand, phone, distance, image
-                    )
-                    
-                    if usage_confidence > self.usage_confidence_threshold:
-                        compound_detections.append({
-                            'compound_bbox': (compound_x1, compound_y1, compound_x2, compound_y2),
-                            'hand_bbox': hand_bbox,
-                            'phone_bbox': phone_bbox,
-                            'usage_confidence': usage_confidence,
-                            'distance': distance,
-                            'type': 'COMPOUND_USAGE',
-                            'hand_center': hand['center'],
-                            'phone_center': phone['center']
-                        })
-        
-        return compound_detections
-    
-    def _calculate_distance(self, point1, point2):
-        """Calculate Euclidean distance between two points"""
-        import math
-        return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
-    
-    def _calculate_usage_confidence(self, hand, phone, distance, image):
-        """Calculate confidence that this represents actual phone usage"""
-        h, w = image.shape[:2]
-        
-        # Base confidence from proximity
-        proximity_score = 1.0 - (distance / self.compound_detection_threshold)
-        
-        # Bonus if phone is in upper portion (near face/ear)
-        phone_y = phone['center'][1]
-        face_area_bonus = 0.3 if phone_y < h * 0.6 else 0.0
-        
-        # Hand orientation analysis
-        orientation_score = self._analyze_hand_phone_orientation(hand, phone)
-        
-        # Size validation (phones shouldn't be too big or small in usage)
-        phone_bbox = phone['bbox']
-        phone_area = (phone_bbox[2] - phone_bbox[0]) * (phone_bbox[3] - phone_bbox[1])
-        relative_area = phone_area / (h * w)
-        size_penalty = 0.2 if relative_area > 0.15 or relative_area < 0.005 else 0.0
-        
-        usage_confidence = min(1.0, proximity_score + face_area_bonus + orientation_score - size_penalty)
-        return max(0.0, usage_confidence)
-    
-    def _analyze_hand_phone_orientation(self, hand, phone):
-        """Analyze if hand positioning suggests phone usage"""
-        fingertips = hand['fingertips']
-        phone_center = phone['center']
-        
-        # Count fingertips near phone
-        tips_near_phone = 0
-        for tip in fingertips:
-            tip_phone_distance = self._calculate_distance(tip, phone_center)
-            if tip_phone_distance < 80:
-                tips_near_phone += 1
-        
-        # More fingertips near phone = higher usage likelihood
-        orientation_score = (tips_near_phone / 5) * 0.3
-        
-        # Check if hand is "wrapped around" phone (usage position)
-        hand_center = hand['center']
-        hand_phone_vector = (phone_center[0] - hand_center[0], phone_center[1] - hand_center[1])
-        
-        # Bonus for typical holding positions
-        if abs(hand_phone_vector[0]) < 50 and hand_phone_vector[1] < 0:  # Phone above hand
-            orientation_score += 0.2
-        
-        return min(0.4, orientation_score)
-    
-    def _detect_phones_near_hands(self, image, hand_landmarks, existing_phones):
-        """Detect potential phones near hand positions"""
-        phones = []
-        h, w = image.shape[:2]
-        
-        if not hand_landmarks:
-            return phones
-        
-        # Get hand positions
-        hand_positions = []
-        for hand_lm in hand_landmarks:
-            for landmark in hand_lm.landmark:
-                x, y = int(landmark.x * w), int(landmark.y * h)
-                hand_positions.append((x, y))
-        
-        # Look for rectangular objects near hands
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
-        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            if 1000 < area < 20000:  # Reasonable phone-sized area
-                # Get bounding rectangle
-                x, y, w_rect, h_rect = cv2.boundingRect(contour)
-                
-                # Check if it's near any hand
-                contour_center = (x + w_rect//2, y + h_rect//2)
-                near_hand = any(
-                    np.sqrt((contour_center[0] - hx)**2 + (contour_center[1] - hy)**2) < self.phone_near_hand_threshold
-                    for hx, hy in hand_positions
-                )
-                
-                if near_hand:
-                    # Check if it's not already detected
-                    contour_bbox = (x, y, x + w_rect, y + h_rect)
-                    is_duplicate = any(
-                        self._boxes_overlap(contour_bbox, 
-                                          phone['compound_bbox'] if phone['type'] == 'COMPOUND_USAGE' 
-                                          else phone['bbox'])
-                        for phone in existing_phones
-                    )
-                    
-                    if not is_duplicate:
-                        phones.append({
-                            'bbox': (x, y, x + w_rect, y + h_rect),
-                            'confidence': 0.6,  # Medium confidence for fusion detection
-                            'type': 'Hand-Fusion',
-                            'class_id': 67
-                        })
-        
-        return phones
-    
-    def _remove_duplicate_detections(self, phone_boxes):
-        """Remove overlapping phone detections"""
-        if len(phone_boxes) <= 1:
-            return phone_boxes
-        
-        # Sort by confidence (handle different confidence key names)
-        def get_confidence(detection):
-            if 'usage_confidence' in detection:
-                return detection['usage_confidence']
-            elif 'confidence' in detection:
-                return detection['confidence']
-            else:
-                return 0.0
-        
-        phone_boxes.sort(key=get_confidence, reverse=True)
-        
-        filtered_phones = []
-        for phone in phone_boxes:
-            # Get the bounding box for overlap detection
-            if phone['type'] == 'COMPOUND_USAGE':
-                phone_bbox = phone['compound_bbox']
-            else:
-                phone_bbox = phone['bbox']
-            
-            is_duplicate = any(
-                self._boxes_overlap(phone_bbox, 
-                                  existing['compound_bbox'] if existing['type'] == 'COMPOUND_USAGE' 
-                                  else existing['bbox'])
-                for existing in filtered_phones
-            )
-            if not is_duplicate:
-                filtered_phones.append(phone)
-        
-        return filtered_phones
-    
-    def _boxes_overlap(self, box1, box2, threshold=0.3):
-        """Check if two bounding boxes overlap significantly"""
-        x1_1, y1_1, x2_1, y2_1 = box1
-        x1_2, y1_2, x2_2, y2_2 = box2
-        
-        # Calculate intersection
-        x1_i = max(x1_1, x1_2)
-        y1_i = max(y1_1, y1_2)
-        x2_i = min(x2_1, x2_2)
-        y2_i = min(y2_1, y2_2)
-        
-        if x2_i <= x1_i or y2_i <= y1_i:
-            return False
-        
-        intersection = (x2_i - x1_i) * (y2_i - y1_i)
-        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
-        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
-        
-        iou = intersection / (area1 + area2 - intersection)
-        return iou > threshold
-    
-    def _draw_enhanced_phone_detections(self, image, phone_boxes):
-        """Draw enhanced phone detection visualizations with TRUE MUID-IITR compound boxes"""
-        for detection in phone_boxes:
-            detection_type = detection['type']
-            
-            if detection_type == 'COMPOUND_USAGE':
-                # TRUE MUID-IITR: Draw compound bounding box
-                compound_bbox = detection['compound_bbox']
-                hand_bbox = detection['hand_bbox']
-                phone_bbox = detection['phone_bbox']
-                usage_confidence = detection['usage_confidence']
-                
-                # Draw compound box (main MUID-IITR feature)
-                cv2.rectangle(image, (compound_bbox[0], compound_bbox[1]), 
-                             (compound_bbox[2], compound_bbox[3]), (0, 255, 255), 4)  # Yellow
-                
-                # Draw individual hand and phone boxes inside compound
-                cv2.rectangle(image, (hand_bbox[0], hand_bbox[1]), 
-                             (hand_bbox[2], hand_bbox[3]), (0, 255, 0), 2)  # Green hand
-                cv2.rectangle(image, (phone_bbox[0], phone_bbox[1]), 
-                             (phone_bbox[2], phone_bbox[3]), (255, 0, 255), 2)  # Magenta phone
-                
-                # Draw connection line
-                cv2.line(image, detection['hand_center'], detection['phone_center'], 
-                        (255, 255, 0), 2)
-                
-                # Usage confidence label
-                label = f"📱USAGE: {usage_confidence:.2f}"
-                label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
-                
-                cv2.rectangle(image, (compound_bbox[0], compound_bbox[1] - label_size[1] - 12), 
-                             (compound_bbox[0] + label_size[0] + 10, compound_bbox[1] - 2), 
-                             (0, 255, 255), -1)
-                cv2.putText(image, label, (compound_bbox[0] + 5, compound_bbox[1] - 8), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-                
-                # Distance indicator
-                distance_text = f"d:{detection['distance']:.0f}px"
-                cv2.putText(image, distance_text, 
-                           (compound_bbox[0], compound_bbox[3] + 20), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                
-            else:
-                # Standard detection (COCO, Hand-Fusion, etc.)
-                x1, y1, x2, y2 = detection['bbox']
-                confidence = detection.get('confidence', 0.0)
-                
-                # Different colors for different detection methods
-                if detection_type == 'COCO':
-                    color = self.PHONE_COLOR  # Magenta
-                    label_prefix = "📱PHONE"
-                elif detection_type == 'Hand-Fusion':
-                    color = (0, 255, 255)  # Yellow
-                    label_prefix = "📱HAND+"
-                else:
-                    color = (255, 150, 0)  # Orange
-                    label_prefix = "📱OTHER"
-                
-                # Draw glowing bounding box
-                cv2.rectangle(image, (x1, y1), (x2, y2), color, 4)
-                cv2.rectangle(image, (x1-2, y1-2), (x2+2, y2+2), color, 1)  # Outer glow
-                
-                # Enhanced label
-                label = f"{label_prefix} {confidence:.2f}"
-                label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                
-                # Label background
-                cv2.rectangle(image, (x1, y1 - label_size[1] - 12), 
-                             (x1 + label_size[0] + 10, y1 - 2), color, -1)
-                cv2.putText(image, label, (x1 + 5, y1 - 8), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        return phones_detected_now
     
     def process_frame(self, image):
-        """Process frame with all detection types"""
-        # Convert BGR to RGB
+        """Process one frame: MediaPipe detection, smooth phone tracking, draw all features"""
+        # Convert once
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Process with all models
+
+        # MediaPipe processing
         face_results = self.face_mesh.process(rgb_image)
         hand_results = self.hands.process(rgb_image)
         pose_results = self.pose.process(rgb_image)
-        # Enhanced phone detection with hand fusion
-        hand_landmarks_list = hand_results.multi_hand_landmarks if hand_results.multi_hand_landmarks else None
-        phones_detected = self.detect_phones_enhanced(image, hand_landmarks_list)
-        
-        # Count detections
-        faces_detected = len(face_results.multi_face_landmarks) if face_results.multi_face_landmarks else 0
-        hands_detected = len(hand_results.multi_hand_landmarks) if hand_results.multi_hand_landmarks else 0
-        pose_detected = 1 if pose_results.pose_landmarks else 0
-        
-        # Increment animation frame for effects
+
+        faces_detected = len(face_results.multi_face_landmarks) if getattr(face_results, "multi_face_landmarks", None) else 0
+        hands_detected = len(hand_results.multi_hand_landmarks) if getattr(hand_results, "multi_hand_landmarks", None) else 0
+        pose_detected  = 1 if getattr(pose_results, "pose_landmarks", None) is not None else 0
+
+        # Enhanced phone detection with smooth tracking
+        hand_lms_list = hand_results.multi_hand_landmarks if hands_detected else None
+        phones_detected = self.detect_phones_enhanced(image, hand_lms_list)
+
+        # Animation tick
         self.animation_frame += 1
-        
-        # Draw face mesh with cool eyes
-        if face_results.multi_face_landmarks:
-            for face_landmarks in face_results.multi_face_landmarks:
-                # Draw very subtle face mesh so eyes stand out
+
+        # Draw face mesh + eyes
+        if faces_detected:
+            for face_lms in face_results.multi_face_landmarks:
                 self.mp_drawing.draw_landmarks(
                     image=image,
-                    landmark_list=face_landmarks,
+                    landmark_list=face_lms,
                     connections=self.mp_face_mesh.FACEMESH_CONTOURS,
                     landmark_drawing_spec=None,
                     connection_drawing_spec=self.mp_drawing.DrawingSpec(color=(60, 60, 60), thickness=1)
                 )
-                
-                # Draw cool but natural eyes
-                self.draw_awesome_eyes(image, face_landmarks, self.LEFT_EYE, self.LEFT_IRIS)
-                self.draw_awesome_eyes(image, face_landmarks, self.RIGHT_EYE, self.RIGHT_IRIS)
-        
-        # Draw awesome glowing hands
-        if hand_results.multi_hand_landmarks:
-            for hand_landmarks in hand_results.multi_hand_landmarks:
-                self.draw_awesome_hands(image, hand_landmarks)
-        
-        # Draw awesome glowing pose skeleton
-        if pose_results.pose_landmarks:
-            # Draw awesome skeleton with glow effects
+                self.draw_awesome_eyes(image, face_lms, self.LEFT_EYE, self.LEFT_IRIS)
+                self.draw_awesome_eyes(image, face_lms, self.RIGHT_EYE, self.RIGHT_IRIS)
+
+        # Draw hands
+        if hands_detected:
+            for hand_lms in hand_results.multi_hand_landmarks:
+                self.draw_awesome_hands(image, hand_lms)
+
+        # Draw pose + shoulders + neck line (KEY MERGED FEATURE!)
+        if pose_detected:
             self.draw_awesome_skeleton(image, pose_results.pose_landmarks)
-            
-            # Still highlight shoulders with extra glow
             self.draw_shoulder_highlight(image, pose_results.pose_landmarks)
-        
+
         return image, faces_detected, hands_detected, pose_detected, phones_detected
     
     def run_webcam(self):
@@ -751,15 +490,15 @@ class CompletePoseDetector:
             print("Error: Could not open webcam")
             return
         
-        print("🎯 AWESOME MediaPipe Detection Started!")
+        print("🎯 StraightUp Detection System Started!")
         print("=" * 50)
-        print("✨ ENHANCED Visual Features:")
-        print("   👁️  Eyes: Natural contours + subtle animated iris") 
+        print("✨ Visual Features:")
+        print("   👁️  Eyes: Natural contours + animated iris")
         print("   🤲 Hands: NEON skeleton with pulsing fingertips")
         print("   💪 Shoulders: HIGHLIGHTED with glow effects")
         print("   🏃 Body: ELECTRIC skeleton with animated joints")
-        print("   📱 Phones: TRUE MUID-IITR compound detection + COCO + Hand-Fusion)")
-        print("   🔬 MUID-IITR: Compound bounding boxes for actual usage detection")
+        print("   � Neck: Smooth center line mapping (EMA smoothed)")
+        print("   � Phones: Enhanced YOLO11n tracking with smoothing")
         print("   ✨ All with GLOW EFFECTS and smooth animations!")
         print("\n⌨️  Controls:")
         print("   'q' or ESC: Quit application")
@@ -833,10 +572,10 @@ class CompletePoseDetector:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                     cv2.putText(processed_frame, "Body: Blue/Pink", (250, legend_y + 10), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                    cv2.putText(processed_frame, "Phones: Magenta/Orange/Yellow", (250, legend_y + 30), 
+                    cv2.putText(processed_frame, "Phones: Magenta (Enhanced Tracking)", (250, legend_y + 30), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
-                    cv2.putText(processed_frame, "(COCO/Usage/Hand-Fusion)", (250, legend_y + 45), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+                    cv2.putText(processed_frame, "Neck: Yellow center line (EMA smooth)", (250, legend_y + 45), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
                 
                 # Pause indicator
                 if paused:
@@ -845,7 +584,7 @@ class CompletePoseDetector:
                     cv2.putText(processed_frame, "PAUSED", (w//2 - 80, h//2 + 5), 
                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
                 
-                cv2.imshow('✨ AWESOME Pose Detection with Glow Effects ✨', processed_frame)
+                cv2.imshow('StraightUp - Enhanced Pose Detection', processed_frame)
                 
                 # Handle key presses
                 key = cv2.waitKey(1) & 0xFF
