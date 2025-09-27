@@ -20,21 +20,16 @@
     <div id="card">
       <h1>Straight Up</h1>
       <p class="sub">Sit tall. Stay sharp. Take control.</p>
-
       <div class="stack">
         <button id="btnLogin"  class="signin">Sign in</button>
         <button id="btnSignup" class="signup">Create account</button>
       </div>
     </div>
   </div>
-
   <script>
-    document.getElementById('btnLogin').onclick = async () => {
-      await window.pywebview.api.login(null);
-    };
-    document.getElementById('btnSignup').onclick = async () => {
-      await window.pywebview.api.signup(null);
-    };
+    const ORIGIN = location.origin;
+    document.getElementById('btnLogin').onclick  = () => location.href = `${ORIGIN}/auth/login`;
+    document.getElementById('btnSignup').onclick = () => location.href = `${ORIGIN}/auth/signup`;
   </script>
 </body>
 </html>

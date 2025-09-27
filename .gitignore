@@ -1,14 +1,22 @@
 ﻿# Python
 __pycache__/
 *.pyc
-
-# Virtual env
 .venv/
+env/
+venv/
 
-# Local env files (don’t commit secrets)
-StraightUp/Login/Auth0/.env
+# Local config
+*.log
+
+# Secrets (DO NOT COMMIT)
+*.env
 .env
 
-# OS
+# OS / editor
 .DS_Store
 Thumbs.db
+
+# PyInstaller / build
+build/
+dist/
+*.spec
