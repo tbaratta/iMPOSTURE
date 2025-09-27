@@ -1,0 +1,22 @@
+﻿# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+
+# Local config
+*.log
+
+# Secrets (DO NOT COMMIT)
+*.env
+.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# PyInstaller / build
+build/
+dist/
+*.spec
