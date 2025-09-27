@@ -18,7 +18,7 @@
 4. Copy the example env file:
    copy .env.example .env
 
-   Then edit .env and paste in the Auth0 values we’ll share with you.
+   Then edit .env and paste in the Auth0 values shared.
 
 5. Run the app:
    python app.py
