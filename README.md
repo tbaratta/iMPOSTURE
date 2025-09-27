@@ -29,7 +29,7 @@ A comprehensive real-time detection system that combines MediaPipe and YOLO11n f
 pip install uv
 
 # Run immediately - dependencies auto-install!
-uv run python pose_detector.py
+uv run python detector.py
 ```
 
 **Option 2: Traditional Setup**
@@ -38,7 +38,7 @@ uv run python pose_detector.py
 pip install mediapipe opencv-python numpy ultralytics
 
 # Run the application
-python pose_detector.py
+python detector.py
 ```
 
 ## 🎮 Controls
@@ -53,7 +53,7 @@ While running:
 
 ```
 StraightUp/
-├── pose_detector.py       # Main detection application
+├── detector.py       # Main detection application
 ├── README.md             # This documentation
 ├── requirements.txt      # Dependencies
 ├── yolo11n.pt           # YOLO model (auto-downloaded)
@@ -97,7 +97,7 @@ StraightUp/
 
 **Installation Issues:**
 - Install uv first: `pip install uv`
-- Use uv for automatic dependency management: `uv run python pose_detector.py`
+- Use uv for automatic dependency management: `uv run python detector.py`
 - Check Python version: `python --version` (should be 3.11+)
 
 ## 📊 System Requirements
