@@ -460,7 +460,7 @@ class ModernTkinterApp:
         
         title_label = tk.Label(
             center_frame,
-            text="StraightUp Desktop",
+            text="Welcome to iMPOSTURE",
             font=self.fonts['title'],
             fg=self.colors['ink'],
             bg=self.colors['bg']
@@ -1865,9 +1865,12 @@ class ModernTkinterApp:
         self.session_paused = False
         self.session_start_time = datetime.now()
         self.session_elapsed = 0
-        
+
+        # Disable Start Session button
+        self.setup_btn.configure(state="disabled")
+
         # Update UI
-        self.session_subtitle.configure(text="Timer active. We're tracking posture and focus.")
+        self.session_subtitle.configure(text="Timer active. We're tracking posture, focus, and environmental distractions.")
         self.pause_btn.configure(
             state="normal",
             fg=self.colors['ink'],
@@ -1882,7 +1885,7 @@ class ModernTkinterApp:
         )
         self.session_status_label.configure(text="Running")
         self.status_dot.configure(fg=self.colors['danger'])
-        
+
         # Start timer
         self.update_timer()
     
@@ -1933,7 +1936,10 @@ class ModernTkinterApp:
         # Reset session state
         self.session_running = False
         self.session_paused = False
-        
+
+        # Re-enable Start Session button
+        self.setup_btn.configure(state="normal")
+
         # Update UI
         self.session_subtitle.configure(text="Session stopped - camera monitoring disabled. Ready for next session.")
         self.pause_btn.configure(
