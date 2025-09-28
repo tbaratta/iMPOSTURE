@@ -39,6 +39,7 @@ class HealthDataManager:
             except Exception as e:
                 print(f"⚠️ Cloud logging initialization failed: {e}")
     
+
     def get_recent_health_data(self, hours: int = 24, limit: int = 100) -> List[Dict[str, Any]]:
         """Fetch recent health data from Google Cloud Logging"""
         if not self.cloud_logging_client:
@@ -274,8 +275,9 @@ class ModernTkinterApp:
         self.session_start_time = None
         self.session_elapsed = 0
         self.timer_id = None
-        self.auto_refresh = True
+        self.auto_refresh = False
         self.current_data = None
+        self.user_name = ""
         
         # Setup UI
         self.setup_ui()
@@ -378,7 +380,7 @@ class ModernTkinterApp:
         # Title
         title_label = tk.Label(
             brand_frame,
-            text="Straight Up",
+            text="iMPOSTURE",
             font=self.fonts['title'],
             fg=self.colors['ink'],
             bg=self.colors['bg']
@@ -553,13 +555,13 @@ class ModernTkinterApp:
         # Welcome message
         self.welcome_label = tk.Label(
             card_content,
-            text="Welcome back",
-            font=self.fonts['title'],
-            fg=self.colors['ink'],
+            text="Welcome Back!",
+            font=self.fonts['large'],
+            fg=self.colors['accent'],
             bg=self.colors['card'],
             anchor="w"
         )
-        self.welcome_label.pack(fill="x", pady=(0, 6))
+        self.welcome_label.pack(fill="x", pady=(0, 12))
         
         # Session title
         session_title = tk.Label(
@@ -575,7 +577,7 @@ class ModernTkinterApp:
         # Session subtitle
         self.session_subtitle = tk.Label(
             card_content,
-            text="Configure your session, then start. We'll time it and track progress.",
+            text="Start a session! We'll time it and track your posture, productivity, and environment!",
             font=self.fonts['body'],
             fg=self.colors['muted'],
             bg=self.colors['card'],
@@ -610,7 +612,7 @@ class ModernTkinterApp:
         
         self.setup_btn = tk.Button(
             controls_frame,
-            text="Open session setup",
+            text="Start Session",
             font=self.fonts['body'],
             fg=self.colors['ink'],
             bg=self.colors['card'],
@@ -789,7 +791,7 @@ class ModernTkinterApp:
         # Title
         title_label = tk.Label(
             card_content,
-            text="Wellness report",
+            text="Wellness Report",
             font=self.fonts['subtitle'],
             fg=self.colors['ink'],
             bg=self.colors['card'],
@@ -1040,7 +1042,7 @@ class ModernTkinterApp:
     def get_metric_icon(self, key):
         """Get icon for metric"""
         icons = {
-            'postureScore': '🧍‍♂️',
+            'postureScore': '🦴',
             'phoneUsage': '📱',
             'noiseLevel': '🔊',
             'focusScore': '🎯'
@@ -1060,92 +1062,8 @@ class ModernTkinterApp:
         return status_map.get(status.lower(), 'muted')
     
     def open_session_setup(self):
-        """Open session setup dialog"""
-        setup_window = tk.Toplevel(self.root)
-        setup_window.title("Session Setup")
-        setup_window.geometry("400x500")
-        setup_window.configure(bg=self.colors['card'])
-        setup_window.transient(self.root)
-        setup_window.grab_set()
-        
-        # Setup window content
-        content_frame = tk.Frame(setup_window, bg=self.colors['card'])
-        content_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Title
-        title_label = tk.Label(
-            content_frame,
-            text="Session setup",
-            font=self.fonts['subtitle'],
-            fg=self.colors['ink'],
-            bg=self.colors['card']
-        )
-        title_label.pack(pady=(0, 20))
-        
-        # Camera preview placeholder
-        camera_frame = tk.Frame(
-            content_frame,
-            height=200,
-            bg=self.colors['panel'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.colors['border']
-        )
-        camera_frame.pack(fill="x", pady=(0, 10))
-        camera_frame.pack_propagate(False)
-        
-        camera_label = tk.Label(
-            camera_frame,
-            text="📹 Webcam Preview\n(used for posture & distraction checks)",
-            font=self.fonts['body'],
-            fg=self.colors['muted'],
-            bg=self.colors['panel']
-        )
-        camera_label.pack(expand=True)
-        
-        # Settings
-        settings_frame = tk.Frame(content_frame, bg=self.colors['card'])
-        settings_frame.pack(fill="x", pady=(0, 20))
-        
-        # Break frequency
-        break_freq_label = tk.Label(
-            settings_frame,
-            text="Break frequency (minutes)",
-            font=self.fonts['body'],
-            fg=self.colors['ink'],
-            bg=self.colors['card'],
-            anchor="w"
-        )
-        break_freq_label.pack(fill="x", pady=(0, 5))
-        
-        break_freq_var = tk.StringVar(value="45")
-        break_freq_combo = ttk.Combobox(
-            settings_frame,
-            textvariable=break_freq_var,
-            values=["25", "45", "50", "60"],
-            state="readonly"
-        )
-        break_freq_combo.pack(fill="x", pady=(0, 10))
-        
-        # Break length
-        break_len_label = tk.Label(
-            settings_frame,
-            text="Break length (minutes)",
-            font=self.fonts['body'],
-            fg=self.colors['ink'],
-            bg=self.colors['card'],
-            anchor="w"
-        )
-        break_len_label.pack(fill="x", pady=(0, 5))
-        
-        break_len_var = tk.StringVar(value="5")
-        break_len_combo = ttk.Combobox(
-            settings_frame,
-            textvariable=break_len_var,
-            values=["3", "5", "10"],
-            state="readonly"
-        )
-        break_len_combo.pack(fill="x", pady=(0, 10))
+        """Start session immediately (no setup popup)"""
+        self.start_session()
         
         # Distraction tracking
         distraction_label = tk.Label(
@@ -1368,37 +1286,11 @@ class ModernTkinterApp:
             command=lambda: setattr(self, 'auto_refresh', refresh_var.get())
         )
         refresh_check.pack(anchor="w", pady=(5, 0))
-        
-        # Project info
-        info_frame = tk.Frame(
-            content_frame,
-            bg=self.colors['panel'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.colors['border']
-        )
-        info_frame.pack(fill="x", pady=(20, 0))
-        
-        info_content = tk.Frame(info_frame, bg=self.colors['panel'])
-        info_content.pack(fill="both", expand=True, padx=15, pady=15)
-        
-        info_text = f"""🎯 Project: perfect-entry-473503-j1
-📊 Real-time ADK health monitoring
-🌐 Google Cloud integration: {'✅' if CLOUD_LOGGING_AVAILABLE else '❌'}
-🖥️ Desktop interface version"""
-        
-        info_label = tk.Label(
-            info_content,
-            text=info_text,
-            font=self.fonts['small'],
-            fg=self.colors['muted'],
-            bg=self.colors['panel'],
-            anchor="w",
-            justify="left"
-        )
-        info_label.pack(fill="both", expand=True)
-        
+
         # Close button
+        def save_and_close():
+            self.setup_refresh_timer()
+            settings_window.destroy()
         close_btn = tk.Button(
             content_frame,
             text="Close",
@@ -1409,7 +1301,7 @@ class ModernTkinterApp:
             bd=0,
             activebackground="#3730a3",
             activeforeground="white",
-            command=settings_window.destroy
+            command=save_and_close
         )
         close_btn.pack(pady=(20, 0))
     
