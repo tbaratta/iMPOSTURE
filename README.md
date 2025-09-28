@@ -47,7 +47,7 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
     ```bash
     python backend/detector.py
     
-5. Insert Google ADK Instructions Here
+5. Google ADK Setup (Optional for log tracking)
 
 - **If you want to stream and analyze Google ADK (Android Developer Kit) logs with StraightUp**
 
