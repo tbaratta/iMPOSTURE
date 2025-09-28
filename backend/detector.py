@@ -45,6 +45,132 @@ try:
 except Exception:
     _toaster = None
 
+    # --- Sticky always-on-top popup (Windows-friendly) ---
+import threading, queue
+import tkinter as tk
+
+class StickyPopup:
+    def __init__(self):
+        self._cmd_q = queue.Queue()
+        self._visible = False
+        self._thread = threading.Thread(target=self._ui_thread, daemon=True)
+        self._thread.start()
+
+    def _ui_thread(self):
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.root.overrideredirect(True)           # no title bar
+        self.root.attributes("-topmost", True)     # always on top
+        self.root.attributes("-alpha", 0.94)       # slight transparency
+
+        self.frame = tk.Frame(self.root, bg="#111111", bd=2, highlightthickness=2, highlightbackground="#FF4081")
+        self.frame.pack(fill="both", expand=True)
+        self.lbl = tk.Label(self.frame, text="", fg="#FFFFFF", bg="#111111", font=("Segoe UI", 16, "bold"), wraplength=520, justify="center")
+        self.lbl.pack(padx=24, pady=20)
+        self.sub = tk.Label(self.frame, text="", fg="#FFD54F", bg="#111111", font=("Segoe UI", 11))
+        self.sub.pack(padx=24, pady=(0,18))
+
+        def pump():
+            try:
+                while True:
+                    cmd, payload = self._cmd_q.get_nowait()
+                    if cmd == "show":
+                        # payload can be a string (back-compat) or a dict with pos/size/sub/border
+                        if isinstance(payload, str):
+                            msg = payload
+                            sub = "Hold neutral posture to dismiss"
+                            border = "#FF4081"
+                            w, h = (560, 160)
+                            pos = "center"
+                        else:
+                            msg = payload.get("msg", "")
+                            sub = payload.get("sub", "")
+                            border = payload.get("border", "#FF4081")
+                            w, h = payload.get("size", (560, 160))
+                            pos = payload.get("pos", "center")
+                        self._set_text(msg, sub)
+                        self.frame.configure(highlightbackground=border)
+                        if pos == "br":
+                            self._place_br(w, h, payload.get("margin", (24, 24)))
+                        else:
+                            self._place_center(w, h)
+                        self.root.deiconify()
+                        self._visible = True
+                        self.root.lift()
+                    elif cmd == "hide":
+                        self.root.withdraw()
+                        self._visible = False
+                    elif cmd == "text":
+                        if isinstance(payload, dict):
+                            self._set_text(payload.get("msg", ""), payload.get("sub", ""))
+                        else:
+                            self._set_text(payload, "")
+            except queue.Empty:
+                pass
+            self.root.after(50, pump)
+        pump()
+        self.root.mainloop()
+
+    def _set_text(self, msg, sub_txt=""):
+        self.lbl.config(text=msg)
+        if sub_txt:
+            self.sub.config(text=sub_txt)
+            self.sub.pack_configure(pady=(0, 18))
+        else:
+            self.sub.config(text="")
+            self.sub.pack_configure(pady=(0, 0))
+
+    def _place_center(self, w, h):
+        self.root.geometry(f"{w}x{h}+{(self.root.winfo_screenwidth()-w)//2}+{(self.root.winfo_screenheight()-h)//3}")
+
+    def _place_br(self, w, h, margin=(24, 24)):
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        mx, my = margin
+        x = sw - w - mx
+        y = sh - h - my
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
+
+        self._mode = None  # "center" or "br"
+
+    # Back-compat (used by posture). Treat as center popup.
+    def show(self, message="StraightUp: fix posture"):
+        # If already showing center, just update text (prevents flicker)
+        if self._visible and self._mode == "center":
+            self.set_text(message, "Hold neutral posture to dismiss")
+            return
+        self._mode = "center"
+        self._cmd_q.put(("show", {
+            "msg": message, "pos": "center", "size": (560, 160),
+            "sub": "Hold neutral posture to dismiss", "border": "#FF4081"
+        }))
+
+    def show_center(self, message, size=(560, 160), sub="Hold neutral posture to dismiss", border="#FF4081"):
+        if self._visible and self._mode == "center":
+            self.set_text(message, sub)
+            return
+        self._mode = "center"
+        self._cmd_q.put(("show", {"msg": message, "pos": "center", "size": size, "sub": sub, "border": border}))
+
+    def show_bottom_right(self, message, size=(420, 140), margin=(24, 24),
+                          sub="Put the phone away to dismiss", border="#FF4081"):
+        if self._visible and self._mode == "br":
+            self.set_text(message, sub)
+            return
+        self._mode = "br"
+        self._cmd_q.put(("show", {"msg": message, "pos": "br", "size": size, "margin": margin, "sub": sub, "border": border}))
+
+    def hide(self):
+        self._mode = None
+        self._cmd_q.put(("hide", None))
+
+    def set_text(self, message, sub=""):
+        self._cmd_q.put(("text", {"msg": message, "sub": sub}))
+
+    def is_visible(self):
+        return self._visible
+
+
 # ======================= POSTURE ANALYSIS =======================
 
 # MediaPipe pose landmarks
@@ -711,11 +837,24 @@ def _notify(title: str, msg: str, duration=5):
 class SystemActions:
     """Tracks timers and triggers actions."""
     def __init__(self, posture_bad_threshold_sec=180, phone_threshold_sec=180,
-                 cooldown_sec=300, dim_percent=60):
+                 cooldown_sec=300, dim_percent=60,
+                 popup=None, ok_grace_sec=2.0, tilt_bad_threshold_sec=8):
         self.posture_bad_threshold = posture_bad_threshold_sec
         self.phone_threshold = phone_threshold_sec
         self.cooldown_sec = cooldown_sec
         self.dim_percent = dim_percent
+
+        self._popup = popup
+        self.ok_grace_sec = ok_grace_sec
+        self._ok_since = None
+
+        # Bottom-right popup + triggers
+        self.tilt_bad_threshold = tilt_bad_threshold_sec    # ← NEW
+        self._tilt_bad_start = None                         # ← NEW
+        self._br_ok_since = None                            # ← NEW (grace for hiding)
+        self._phone_seen_start = None
+        self._last_posture_alert = 0.0
+        self._last_dim_action = 0.0
 
         self._posture_bad_start = None
         self._phone_seen_start = None
@@ -726,54 +865,137 @@ class SystemActions:
         self._dimmer = _GammaRampDimmer()
         self._dim_active = False
 
+        # --- Popup latching / debounce ---
+        self.min_popup_show_sec = 1.2   # popup must stay up at least this long
+        self._center_visible = False
+        self._center_shown_at = 0.0
+        self._br_visible = False
+        self._br_shown_at = 0.0
+
     @staticmethod
-    def _count_bad_areas(analysis: dict) -> int:
+
+    def _only_head_tilt_issue(states: dict) -> bool:
+        """
+        Returns True when head_tilt is BAD or WARN AND all other posture keys are OK/missing.
+        This is our heuristic for 'probably on a phone'.
+        """
+        head = states.get("head_tilt")
+        if head not in ("BAD", "WARN"):
+            return False
+
+        other_keys = ["neck_flexion", "forward_head", "shoulder_level"]
+        if "shoulder_open" in states:
+            other_keys.append("shoulder_open")
+
+        # Consider OK or missing as fine for the 'only head tilt' test
+        return all(states.get(k) in (None, "OK") for k in other_keys)
+    def _count_bad_areas(self, analysis: dict) -> int:
         states = analysis.get("states", {})
         keys = ["neck_flexion", "forward_head", "head_tilt", "shoulder_level"]
         if "shoulder_open" in states:
             keys.append("shoulder_open")
+        if "torso_pitch" in states:             # <-- add this line
+            keys.append("torso_pitch") 
         return sum(1 for k in keys if states.get(k) == "BAD")
 
     def update(self, analysis: dict, phones_detected_now: int):
         now = time.monotonic()
 
-        # Posture timer (≥4 BAD areas)
+        # ---------- posture severity counter ----------
         bad_count = self._count_bad_areas(analysis)
-        if bad_count >= 4:
+        if bad_count >= 3:
             if self._posture_bad_start is None:
                 self._posture_bad_start = now
         else:
             self._posture_bad_start = None
 
-        # Fire posture alert if threshold met and cooldown passed
+        # ---------- center popup (posture) with latching ----------
         if self._posture_bad_start is not None:
             elapsed = now - self._posture_bad_start
             if elapsed >= self.posture_bad_threshold and (now - self._last_posture_alert) >= self.cooldown_sec:
                 _notify("StraightUp", "Posture has been BAD in multiple areas for 3 minutes. Take a break and reset!")
                 self._last_posture_alert = now
 
-        # Phone timer (any phone visible)
+            if (elapsed >= self.posture_bad_threshold) and self._popup:
+                if not self._center_visible:
+                    # show on rising edge only
+                    self._popup.show_center(
+                        "StraightUp: Unwind posture — head back over shoulders, open chest.",
+                        sub="Hold neutral posture to dismiss"
+                    )
+                    self._center_visible = True
+                    self._center_shown_at = now
+                self._ok_since = None
+        else:
+            # request hide only if (a) it's visible, (b) posture OK is stable for ok_grace_sec,
+            # and (c) we've satisfied the minimum on-screen time
+            if self._center_visible:
+                if self._ok_since is None:
+                    self._ok_since = now
+                if (now - self._ok_since) >= self.ok_grace_sec and (now - self._center_shown_at) >= self.min_popup_show_sec:
+                    if self._popup:
+                        self._popup.hide()
+                    self._center_visible = False
+                    self._ok_since = None
+
+        # ---------- phone detection timing ----------
         if (phones_detected_now or 0) > 0:
             if self._phone_seen_start is None:
                 self._phone_seen_start = now
         else:
             self._phone_seen_start = None
-            # If we were dimmed and phone gone, restore immediately
             if self._dim_active:
                 self._dimmer.restore()
                 self._dim_active = False
 
-        # Dim screen if threshold met (and not already dim)
-        if self._phone_seen_start is not None and not self._dim_active:
-            elapsed = now - self._phone_seen_start
-            if elapsed >= self.phone_threshold and (now - self._last_dim_action) >= self.cooldown_sec:
-                ok = self._dimmer.set_brightness(self.dim_percent)
-                self._dim_active = ok
-                self._last_dim_action = now
-                if ok:
-                    _notify("StraightUp", "Phone on screen for 3 minutes. Dimming display.")
-                else:
-                    _notify("StraightUp", "Tried to dim display, but it wasn't supported.")
+        # ---------- head tilt timing ----------
+        states = analysis.get("states", {})
+        tilt_only_now = self._only_head_tilt_issue(states)
+        if tilt_only_now:
+            if self._tilt_bad_start is None:
+                self._tilt_bad_start = now
+        else:
+            self._tilt_bad_start = None
+
+        phone_triggered = (self._phone_seen_start is not None and (now - self._phone_seen_start) >= self.phone_threshold)
+        tilt_triggered  = (self._tilt_bad_start  is not None and (now - self._tilt_bad_start)  >= self.tilt_bad_threshold)
+        br_should_show  = phone_triggered or tilt_triggered
+
+        # If center popup is up, give it priority and don’t juggle positions
+        if self._center_visible:
+            br_should_show = False
+
+        # ---------- bottom-right popup (phone/tilt) with latching ----------
+        if self._popup:
+            if br_should_show:
+                # show on rising edge only
+                if not self._br_visible:
+                    self._popup.show_bottom_right(
+                        "Get off your phone and get back to work!",
+                        sub="Hold head level or put the phone away to dismiss"
+                    )
+                    self._br_visible = True
+                    self._br_shown_at = now
+                self._br_ok_since = None
+            else:
+                # request hide only when OK is stable and min show time has elapsed
+                if self._br_visible:
+                    if self._br_ok_since is None:
+                        self._br_ok_since = now
+                    if (now - self._br_ok_since) >= self.ok_grace_sec and (now - self._br_shown_at) >= self.min_popup_show_sec:
+                        self._popup.hide()
+                        self._br_visible = False
+                        self._br_ok_since = None
+
+        # ---------- dimming stays tied to phone only ----------
+        if phone_triggered and (not self._dim_active) and (now - self._last_dim_action) >= self.cooldown_sec:
+            ok = self._dimmer.set_brightness(self.dim_percent)
+            self._dim_active = ok
+            self._last_dim_action = now
+            if ok:
+                _notify("StraightUp", "Phone on screen for 3 minutes. Dimming display.")
+            else:
+                _notify("StraightUp", "Tried to dim display, but it wasn't supported.")
 
     def cleanup(self):
         # Always restore gamma if we changed it
@@ -858,11 +1080,15 @@ class IntegratedPoseDetector:
         
         # Initialize posture analyzer and system actions
         self.posture = PostureAnalyzer(ema_alpha=0.35)
+        self.popup = StickyPopup()
         self.system = SystemActions(
-            posture_bad_threshold_sec=180,
+            posture_bad_threshold_sec=10,
             phone_threshold_sec=5,
             cooldown_sec=2,
+            popup=self.popup,    
             dim_percent=60,
+            ok_grace_sec=1.5,  
+            tilt_bad_threshold_sec=8,   # ← same popup if head tilt BAD ≥ 8s
         )
         
         # Phone usage tracking
@@ -1614,6 +1840,80 @@ class IntegratedPoseDetector:
         for txt, col in lines:
             y += line_gap
             cv2.putText(image, txt, (x0 + pad_x, y), font, scale, col, thick, cv2.LINE_AA)
+
+    def _wrap_text(self, text, font, scale, thickness, max_width):
+        """Simple word-wrap for OpenCV text."""
+        lines = []
+        for raw in text.splitlines():
+            words = raw.split(" ")
+            if not words:
+                lines.append("")
+                continue
+            cur = ""
+            for w in words:
+                test = w if cur == "" else (cur + " " + w)
+                (tw, _), _ = cv2.getTextSize(test, font, scale, thickness)
+                if tw <= max_width:
+                    cur = test
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+        return lines
+
+    def _draw_sticky_alert(self, image, title="⚠️ StraightUp Alert", msg="", footer="Hold OK posture for 2s to dismiss"):
+        """Dim background and draw a centered sticky alert card that sits above everything."""
+        h, w = image.shape[:2]
+
+        # Dim the whole frame a bit
+        overlay = image.copy()
+        cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.35, image, 0.65, 0, image)
+
+        # Card layout
+        card_w = min(int(w * 0.72), 720)
+        pad = 18
+        x0 = (w - card_w) // 2
+        y0 = int(h * 0.18)
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        title_scale, title_th = 0.95, 2
+        body_scale, body_th = 0.70, 2
+        foot_scale, foot_th = 0.60, 1
+
+        # Wrap body text
+        body_lines = self._wrap_text(msg, font, body_scale, body_th, card_w - 2 * pad)
+
+        # Heights
+        title_h = cv2.getTextSize(title, font, title_scale, title_th)[0][1]
+        line_h  = cv2.getTextSize("Hg",  font, body_scale,  body_th)[0][1] + 10
+        foot_h  = cv2.getTextSize(footer, font, foot_scale, foot_th)[0][1]
+
+        card_h = pad + title_h + 14 + len(body_lines) * line_h + 16 + foot_h + pad
+        y1 = y0 + card_h
+
+        # Card
+        cv2.rectangle(image, (x0, y0), (x0 + card_w, y1), (20, 20, 20), -1)
+        cv2.rectangle(image, (x0, y0), (x0 + card_w, y1), (50, 50, 255), 3)
+
+        # Title
+        cv2.putText(image, title, (x0 + pad, y0 + pad + title_h),
+                    font, title_scale, (0, 215, 255), title_th, cv2.LINE_AA)
+
+        # Body
+        y = y0 + pad + title_h + 14
+        for line in body_lines:
+            y += line_h
+            cv2.putText(image, line, (x0 + pad, y),
+                        font, body_scale, (255, 255, 255), body_th, cv2.LINE_AA)
+
+        # Footer
+        y += 16
+        cv2.putText(image, footer, (x0 + pad, y),
+                    font, foot_scale, (200, 200, 200), foot_th, cv2.LINE_AA)
+
 
     def draw_phone_usage_graph(self, image, position=(50, 250), width=300, height=80):
         """Draw phone usage history graph"""
