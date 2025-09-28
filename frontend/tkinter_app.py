@@ -14,6 +14,82 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 import json
 
+# ---------- Supabase setup ----------
+from dotenv import load_dotenv
+load_dotenv()
+
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+    
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        print("❌ SUPABASE_URL or SUPABASE_ANON_KEY missing.")
+        print("Create a .env next to tkinter_app.py with:")
+        print("SUPABASE_URL=https://YOUR-PROJECT.supabase.co")
+        print("SUPABASE_ANON_KEY=YOUR-ANON-KEY")
+        SUPABASE_AVAILABLE = False
+        supabase = None
+    else:
+        supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        print("✅ Supabase client initialized")
+        
+except ImportError:
+    print("⚠️ Supabase not available - install with: pip install supabase python-dotenv")
+    SUPABASE_AVAILABLE = False
+    supabase = None
+
+class AuthState:
+    def __init__(self):
+        self.session = None
+        self.user = None
+
+    def is_authenticated(self) -> bool:
+        return self.session is not None and self.user is not None
+
+AUTH = AuthState()
+
+def supabase_sign_in(email: str, password: str):
+    """
+    Email/password sign-in. Returns (ok, err_message_or_None).
+    """
+    if not SUPABASE_AVAILABLE or not supabase:
+        return False, "Supabase not available"
+        
+    try:
+        res = supabase.auth.sign_in_with_password({"email": email, "password": password})
+        AUTH.session = res.session
+        AUTH.user = res.user
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def supabase_sign_up(email: str, password: str):
+    """
+    Email/password sign-up. Returns (ok, err_message_or_None).
+    """
+    if not SUPABASE_AVAILABLE or not supabase:
+        return False, "Supabase not available"
+        
+    try:
+        res = supabase.auth.sign_up({"email": email, "password": password})
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+def supabase_sign_out():
+    """Sign out and clear auth state"""
+    if SUPABASE_AVAILABLE and supabase:
+        try:
+            supabase.auth.sign_out()
+        except:
+            pass
+    
+    AUTH.session = None
+    AUTH.user = None
+
 # Set Google Cloud Project
 os.environ['GOOGLE_CLOUD_PROJECT'] = 'perfect-entry-473503-j1'
 
@@ -246,7 +322,7 @@ class ModernTkinterApp:
     
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Straight Up — Desktop Dashboard")
+        self.root.title("iMPOSTURE — Desktop Dashboard")
         self.root.geometry("1200x800")
         self.root.minsize(1000, 700)
         
@@ -282,12 +358,17 @@ class ModernTkinterApp:
         self.today_minutes = 0
         self.adk_process = None  # Track ADK production process
         
-        # Setup UI
-        self.setup_ui()
-        self.setup_refresh_timer()
+        # Authentication state
+        self.authenticated = False
+        self.auth_frame = None
+        self.main_app_frame = None
         
-        # Load initial data
-        self.refresh_data()
+        # Check authentication and setup appropriate UI
+        if SUPABASE_AVAILABLE and AUTH.is_authenticated():
+            self.authenticated = True
+            self.setup_main_app()
+        else:
+            self.setup_auth_ui()
         
         # Handle window closing to ensure camera is turned off
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -343,20 +424,411 @@ class ModernTkinterApp:
             background=[('active', '#dc2626')]
         )
     
-    def setup_ui(self):
-        """Setup the user interface"""
-        # Main container with padding
-        self.main_frame = tk.Frame(self.root, bg=self.colors['bg'])
-        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+    def setup_auth_ui(self):
+        """Setup authentication interface"""
+        # Clear any existing content
+        for widget in self.root.winfo_children():
+            widget.destroy()
+            
+        # Create auth frame
+        self.auth_frame = tk.Frame(self.root, bg=self.colors['bg'])
+        self.auth_frame.pack(fill="both", expand=True)
+        
+        # Center container
+        center_frame = tk.Frame(self.auth_frame, bg=self.colors['bg'])
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Logo and title
+        logo_frame = tk.Frame(
+            center_frame,
+            width=48, height=48,
+            bg=self.colors['accent'],
+            relief='solid',
+            bd=1
+        )
+        logo_frame.pack(pady=(0, 20))
+        logo_frame.pack_propagate(False)
+        
+        logo_label = tk.Label(
+            logo_frame,
+            text="⬆",
+            font=self.fonts['subtitle'],
+            fg="white",
+            bg=self.colors['accent']
+        )
+        logo_label.pack(expand=True)
+        
+        title_label = tk.Label(
+            center_frame,
+            text="StraightUp Desktop",
+            font=self.fonts['title'],
+            fg=self.colors['ink'],
+            bg=self.colors['bg']
+        )
+        title_label.pack(pady=(0, 30))
+        
+        # Auth card
+        auth_card = tk.Frame(
+            center_frame,
+            bg=self.colors['card'],
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1
+        )
+        auth_card.pack(padx=40, pady=20, ipadx=40, ipady=30)
+        
+        # Login form
+        self.setup_login_form(auth_card)
+    
+    def setup_login_form(self, parent):
+        """Setup login form"""
+        # Title
+        form_title = tk.Label(
+            parent,
+            text="Sign In",
+            font=self.fonts['subtitle'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        form_title.pack(pady=(0, 20))
+        
+        # Email field
+        email_label = tk.Label(
+            parent,
+            text="Email",
+            font=self.fonts['body'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        email_label.pack(anchor="w", pady=(0, 5))
+        
+        self.email_var = tk.StringVar()
+        email_entry = tk.Entry(
+            parent,
+            textvariable=self.email_var,
+            font=self.fonts['body'],
+            bg=self.colors['panel'],
+            fg=self.colors['ink'],
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1,
+            width=30
+        )
+        email_entry.pack(pady=(0, 15), ipady=8)
+        
+        # Password field
+        password_label = tk.Label(
+            parent,
+            text="Password",
+            font=self.fonts['body'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        password_label.pack(anchor="w", pady=(0, 5))
+        
+        self.password_var = tk.StringVar()
+        password_entry = tk.Entry(
+            parent,
+            textvariable=self.password_var,
+            font=self.fonts['body'],
+            bg=self.colors['panel'],
+            fg=self.colors['ink'],
+            show="*",
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1,
+            width=30
+        )
+        password_entry.pack(pady=(0, 20), ipady=8)
+        
+        # Login button
+        login_btn = tk.Button(
+            parent,
+            text="Sign In",
+            font=self.fonts['body'],
+            fg="white",
+            bg=self.colors['accent'],
+            relief='flat',
+            bd=0,
+            command=self.handle_login,
+            cursor="hand2"
+        )
+        login_btn.pack(pady=(0, 15), ipady=12, fill="x")
+        
+        # Signup link
+        signup_frame = tk.Frame(parent, bg=self.colors['card'])
+        signup_frame.pack()
+        
+        signup_label = tk.Label(
+            signup_frame,
+            text="Don't have an account? ",
+            font=self.fonts['small'],
+            fg=self.colors['muted'],
+            bg=self.colors['card']
+        )
+        signup_label.pack(side="left")
+        
+        signup_link = tk.Label(
+            signup_frame,
+            text="Sign Up",
+            font=self.fonts['small'],
+            fg=self.colors['accent'],
+            bg=self.colors['card'],
+            cursor="hand2"
+        )
+        signup_link.pack(side="left")
+        signup_link.bind("<Button-1>", lambda e: self.show_signup_form())
+        
+        # Status label for errors
+        self.auth_status = tk.Label(
+            parent,
+            text="",
+            font=self.fonts['small'],
+            fg=self.colors['danger'],
+            bg=self.colors['card']
+        )
+        self.auth_status.pack(pady=(10, 0))
+    
+    def show_signup_form(self):
+        """Switch to signup form"""
+        # Clear current auth card
+        for widget in self.auth_frame.winfo_children():
+            widget.destroy()
+            
+        # Recreate center container
+        center_frame = tk.Frame(self.auth_frame, bg=self.colors['bg'])
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Logo and title
+        logo_frame = tk.Frame(
+            center_frame,
+            width=48, height=48,
+            bg=self.colors['accent'],
+            relief='solid',
+            bd=1
+        )
+        logo_frame.pack(pady=(0, 20))
+        logo_frame.pack_propagate(False)
+        
+        logo_label = tk.Label(
+            logo_frame,
+            text="⬆",
+            font=self.fonts['subtitle'],
+            fg="white",
+            bg=self.colors['accent']
+        )
+        logo_label.pack(expand=True)
+        
+        title_label = tk.Label(
+            center_frame,
+            text="iMPOSTURE Desktop",
+            font=self.fonts['title'],
+            fg=self.colors['ink'],
+            bg=self.colors['bg']
+        )
+        title_label.pack(pady=(0, 30))
+        
+        # Auth card
+        auth_card = tk.Frame(
+            center_frame,
+            bg=self.colors['card'],
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1
+        )
+        auth_card.pack(padx=40, pady=20, ipadx=40, ipady=30)
+        
+        # Signup form
+        self.setup_signup_form(auth_card)
+    
+    def setup_signup_form(self, parent):
+        """Setup signup form"""
+        # Title
+        form_title = tk.Label(
+            parent,
+            text="Create Account",
+            font=self.fonts['subtitle'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        form_title.pack(pady=(0, 20))
+        
+        # Email field
+        email_label = tk.Label(
+            parent,
+            text="Email",
+            font=self.fonts['body'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        email_label.pack(anchor="w", pady=(0, 5))
+        
+        self.signup_email_var = tk.StringVar()
+        email_entry = tk.Entry(
+            parent,
+            textvariable=self.signup_email_var,
+            font=self.fonts['body'],
+            bg=self.colors['panel'],
+            fg=self.colors['ink'],
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1,
+            width=30
+        )
+        email_entry.pack(pady=(0, 15), ipady=8)
+        
+        # Password field
+        password_label = tk.Label(
+            parent,
+            text="Password",
+            font=self.fonts['body'],
+            fg=self.colors['ink'],
+            bg=self.colors['card']
+        )
+        password_label.pack(anchor="w", pady=(0, 5))
+        
+        self.signup_password_var = tk.StringVar()
+        password_entry = tk.Entry(
+            parent,
+            textvariable=self.signup_password_var,
+            font=self.fonts['body'],
+            bg=self.colors['panel'],
+            fg=self.colors['ink'],
+            show="*",
+            relief='solid',
+            bd=1,
+            highlightbackground=self.colors['border'],
+            highlightthickness=1,
+            width=30
+        )
+        password_entry.pack(pady=(0, 20), ipady=8)
+        
+        # Signup button
+        signup_btn = tk.Button(
+            parent,
+            text="Create Account",
+            font=self.fonts['body'],
+            fg="white",
+            bg=self.colors['accent'],
+            relief='flat',
+            bd=0,
+            command=self.handle_signup,
+            cursor="hand2"
+        )
+        signup_btn.pack(pady=(0, 15), ipady=12, fill="x")
+        
+        # Login link
+        login_frame = tk.Frame(parent, bg=self.colors['card'])
+        login_frame.pack()
+        
+        login_label = tk.Label(
+            login_frame,
+            text="Already have an account? ",
+            font=self.fonts['small'],
+            fg=self.colors['muted'],
+            bg=self.colors['card']
+        )
+        login_label.pack(side="left")
+        
+        login_link = tk.Label(
+            login_frame,
+            text="Sign In",
+            font=self.fonts['small'],
+            fg=self.colors['accent'],
+            bg=self.colors['card'],
+            cursor="hand2"
+        )
+        login_link.pack(side="left")
+        login_link.bind("<Button-1>", lambda e: self.setup_auth_ui())
+        
+        # Status label for errors
+        self.signup_status = tk.Label(
+            parent,
+            text="",
+            font=self.fonts['small'],
+            fg=self.colors['danger'],
+            bg=self.colors['card']
+        )
+        self.signup_status.pack(pady=(10, 0))
+    
+    def handle_login(self):
+        """Handle login attempt"""
+        if not SUPABASE_AVAILABLE:
+            self.auth_status.config(text="Authentication not available - missing Supabase setup")
+            return
+            
+        email = self.email_var.get().strip()
+        password = self.password_var.get().strip()
+        
+        if not email or not password:
+            self.auth_status.config(text="Please enter both email and password")
+            return
+            
+        self.auth_status.config(text="Signing in...")
+        self.root.update()
+        
+        success, error = supabase_sign_in(email, password)
+        
+        if success:
+            self.authenticated = True
+            self.setup_main_app()
+        else:
+            self.auth_status.config(text=f"Login failed: {error}")
+    
+    def handle_signup(self):
+        """Handle signup attempt"""
+        if not SUPABASE_AVAILABLE:
+            self.signup_status.config(text="Authentication not available - missing Supabase setup")
+            return
+            
+        email = self.signup_email_var.get().strip()
+        password = self.signup_password_var.get().strip()
+        
+        if not email or not password:
+            self.signup_status.config(text="Please enter both email and password")
+            return
+            
+        if len(password) < 6:
+            self.signup_status.config(text="Password must be at least 6 characters")
+            return
+            
+        self.signup_status.config(text="Creating account...")
+        self.root.update()
+        
+        success, error = supabase_sign_up(email, password)
+        
+        if success:
+            self.signup_status.config(text="Account created! Please check email for verification.")
+        else:
+            self.signup_status.config(text=f"Signup failed: {error}")
+    
+    def setup_main_app(self):
+        """Setup main application interface after authentication"""
+        # Clear any existing content
+        for widget in self.root.winfo_children():
+            widget.destroy()
+            
+        # Create main app frame
+        self.main_app_frame = tk.Frame(self.root, bg=self.colors['bg'])
+        self.main_app_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Setup components
-        self.setup_header()
+        self.setup_authenticated_header()
         self.setup_badges()
         self.setup_main_content()
+        self.setup_refresh_timer()
+        
+        # Load initial data
+        self.refresh_data()
     
-    def setup_header(self):
-        """Setup header with logo and controls"""
-        header_frame = tk.Frame(self.main_frame, bg=self.colors['bg'])
+    def setup_authenticated_header(self):
+        """Setup header with authentication info and logout"""
+        header_frame = tk.Frame(self.main_app_frame, bg=self.colors['bg'])
         header_frame.pack(fill="x", pady=(0, 16))
         
         # Brand section
@@ -393,7 +865,7 @@ class ModernTkinterApp:
         )
         title_label.pack(side="left")
         
-        # Control buttons
+        # Control buttons and user info
         controls_frame = tk.Frame(header_frame, bg=self.colors['bg'])
         controls_frame.pack(side="right")
         
@@ -437,10 +909,59 @@ class ModernTkinterApp:
             command=self.refresh_data
         )
         refresh_btn.pack(side="right", padx=5)
+        
+        # User info separator
+        separator = tk.Frame(controls_frame, width=2, bg=self.colors['border'])
+        separator.pack(side="right", fill="y", padx=15)
+        
+        # User email
+        user_email = AUTH.user.email if AUTH.user else "User"
+        user_label = tk.Label(
+            controls_frame,
+            text=f"Welcome, {user_email}",
+            font=self.fonts['body'],
+            fg=self.colors['muted'],
+            bg=self.colors['bg']
+        )
+        user_label.pack(side="right", padx=(0, 15))
+        
+        # Logout button
+        logout_btn = tk.Button(
+            controls_frame,
+            text="Logout",
+            font=self.fonts['body'],
+            fg=self.colors['ink'],
+            bg=self.colors['card'],
+            relief='solid',
+            bd=1,
+            command=self.handle_logout,
+            cursor="hand2"
+        )
+        logout_btn.pack(side="right", padx=5)
+    
+    def handle_logout(self):
+        """Handle logout"""
+        supabase_sign_out()
+        self.authenticated = False
+        
+        # Stop any running processes
+        if hasattr(self, 'stop_adk_production'):
+            self.stop_adk_production()
+            
+        # Return to auth screen
+        self.setup_auth_ui()
+    
+    def setup_ui(self):
+        """Deprecated - use setup_main_app() for authenticated users"""
+        pass
+    
+    def setup_header(self):
+        """Delegate to authenticated header setup"""
+        self.setup_authenticated_header()
     
     def setup_badges(self):
         """Setup incentive badges"""
-        badges_frame = tk.Frame(self.main_frame, bg=self.colors['bg'])
+        badges_frame = tk.Frame(self.main_app_frame, bg=self.colors['bg'])
         badges_frame.pack(fill="x", pady=(0, 16))
         
         # Level badge
@@ -534,7 +1055,7 @@ class ModernTkinterApp:
     
     def setup_main_content(self):
         """Setup main two-column content area"""
-        content_frame = tk.Frame(self.main_frame, bg=self.colors['bg'])
+        content_frame = tk.Frame(self.main_app_frame, bg=self.colors['bg'])
         content_frame.pack(fill="both", expand=True)
         
         # Session card (left column)
@@ -1540,7 +2061,7 @@ class ModernTkinterApp:
     
     def run(self):
         """Run the desktop application"""
-        print("🚀 Starting Modern StraightUp Desktop App...")
+        print("🚀 Starting Modern iMPOSTURE Desktop App...")
         print("🎯 Project: perfect-entry-473503-j1")
         print("📊 Modern UI matching web design (Pure Tkinter)")
         
@@ -1552,7 +2073,7 @@ class ModernTkinterApp:
             print(f"❌ Desktop app error: {e}")
 
 if __name__ == "__main__":
-    print("🖥️ StraightUp Modern Desktop Dashboard - Pure Tkinter")
+    print("🖥️ iMPOSTURE Modern Desktop Dashboard - Pure Tkinter")
     print("=" * 60)
     print("🎯 Project: perfect-entry-473503-j1")
     print("📊 Beautiful desktop interface")
