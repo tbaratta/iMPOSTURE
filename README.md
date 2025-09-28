@@ -1,7 +1,7 @@
 # iMPOSTURE 🎯  
 > *AI-powered posture and wellness tracker for students and professionals.*  
 
-StraightUp helps you stay healthy and productive by monitoring your posture, reminding you to take breaks, and logging distractions in real time. Built for classrooms, remote workers, and corporate wellness.  
+iMPOSTURE helps you stay healthy and productive by monitoring your posture, reminding you to take breaks, and logging distractions in real time. Built for classrooms, remote workers, and corporate wellness.  
 
 ---
 
