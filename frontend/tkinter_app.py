@@ -1,3 +1,5 @@
+    # Add a variable to track today's total minutes
+
 """
 StraightUp Modern Desktop App - Pure Tkinter
 Beautiful desktop interface matching the web UI design (no CustomTkinter dependency)
@@ -278,6 +280,8 @@ class ModernTkinterApp:
         self.auto_refresh = False
         self.current_data = None
         self.user_name = ""
+
+        self.today_minutes = 0
         
         # Setup UI
         self.setup_ui()
@@ -925,28 +929,28 @@ class ModernTkinterApp:
     
     def setup_refresh_timer(self):
         """Setup auto-refresh timer"""
-        if self.auto_refresh:
+        if self.auto_refresh and self.session_running:
             self.root.after(5000, self.auto_refresh_data)  # Refresh every 5 seconds
     
     def auto_refresh_data(self):
         """Auto-refresh data if enabled"""
-        if self.auto_refresh:
+        if self.auto_refresh and self.session_running:
             self.refresh_data()
             self.setup_refresh_timer()
     
     def refresh_data(self):
         """Refresh health data from backend"""
+        if not self.session_running:
+            return
         def fetch_data():
             try:
                 self.current_data = self.data_manager.get_health_summary()
                 self.root.after(0, self.update_ui)
             except Exception as e:
                 self.root.after(0, lambda: self.show_error(f"Failed to fetch data: {e}"))
-        
         # Run in background thread
         thread = threading.Thread(target=fetch_data, daemon=True)
         thread.start()
-        
         # Update status
         self.status_label.configure(text="🔄 Refreshing...")
     
@@ -1208,20 +1212,23 @@ class ModernTkinterApp:
         # Show session summary
         minutes = int(self.session_elapsed // 60)
         seconds = int(self.session_elapsed % 60)
-        
+
         if minutes > 0:
             messagebox.showinfo(
                 "Session Complete",
                 f"Session saved! Duration: {minutes}m {seconds}s\n\nGreat work on your focus session!"
             )
-            
-            # Update today badge
-            self.today_badge.title_label.configure(text=f"{minutes} min today")
+            # Accumulate today's minutes
+            self.today_minutes += minutes
+            self.today_badge.title_label.configure(text=f"{self.today_minutes} min today")
         else:
             messagebox.showwarning(
                 "Session Too Short",
                 "Session was too short to save (< 1 minute)."
             )
+        # Always clear timer label after session
+        self.timer_label.configure(text="00:00")
+        self.session_elapsed = 0
     
     def update_timer(self):
         """Update the session timer"""
