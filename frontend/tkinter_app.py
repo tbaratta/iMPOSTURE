@@ -1,5 +1,3 @@
-    # Add a variable to track today's total minutes
-
 """
 StraightUp Modern Desktop App - Pure Tkinter
 Beautiful desktop interface matching the web UI design (no CustomTkinter dependency)
@@ -11,7 +9,8 @@ from tkinter import ttk, messagebox, font
 import threading
 import time
 import os
-from datetime import datetime, timedelta
+import subprocess
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional
 import json
 
@@ -280,8 +279,8 @@ class ModernTkinterApp:
         self.auto_refresh = False
         self.current_data = None
         self.user_name = ""
-
         self.today_minutes = 0
+        self.adk_process = None  # Track ADK production process
         
         # Setup UI
         self.setup_ui()
@@ -289,6 +288,9 @@ class ModernTkinterApp:
         
         # Load initial data
         self.refresh_data()
+        
+        # Handle window closing to ensure camera is turned off
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def setup_styles(self):
         """Setup custom styles and colors"""
@@ -657,6 +659,21 @@ class ModernTkinterApp:
         )
         self.stop_btn.pack(side="left", padx=5)
         
+        # Camera Off button (disabled)
+        # Emergency camera button removed
+        #     text="� Camera OFF",
+        #     font=self.fonts['small'],
+        #     fg=self.colors['muted'],
+        #     bg=self.colors['card'],
+        #     relief='solid',
+        #     bd=1,
+        #     highlightbackground=self.colors['border'],
+        #     activebackground=self.colors['panel'],
+        #     activeforeground=self.colors['ink'],
+        #     command=self.camera_off
+        # )
+        # self.camera_off_btn.pack(side="left", padx=5)
+        
         # Status pill
         status_frame = tk.Frame(
             controls_frame,
@@ -962,8 +979,11 @@ class ModernTkinterApp:
         
         data = self.current_data
         
-        # Update status
-        self.status_label.configure(text="🟢 System Active")
+        # Update status based on ADK system and data availability
+        if self.is_adk_running():
+            self.status_label.configure(text="🟢 ADK System Active")
+        else:
+            self.status_label.configure(text="🟢 Data Available")
         
         # Update metrics
         metrics = data.get('metrics', {})
@@ -1065,72 +1085,260 @@ class ModernTkinterApp:
         }
         return status_map.get(status.lower(), 'muted')
     
+    def start_adk_production(self):
+        """Start the ADK production webcam monitoring system"""
+        try:
+            # Path to the backend directory - more robust path resolution
+            current_file = os.path.abspath(__file__)
+            frontend_dir = os.path.dirname(current_file)
+            project_root = os.path.dirname(frontend_dir)
+            backend_path = os.path.join(project_root, 'backend')
+            adk_script = os.path.join(backend_path, 'adk_production.py')
+            
+            print(f"📁 Frontend dir: {frontend_dir}")
+            print(f"📁 Project root: {project_root}")
+            print(f"📁 Backend path: {backend_path}")
+            print(f"📝 ADK script: {adk_script}")
+            
+            if not os.path.exists(backend_path):
+                print(f"❌ Backend directory not found: {backend_path}")
+                messagebox.showerror("Error", f"Backend directory not found: {backend_path}")
+                return
+                
+            if not os.path.exists(adk_script):
+                print(f"❌ ADK production script not found: {adk_script}")
+                messagebox.showerror("Error", "ADK production script not found!")
+                return
+            
+            # Stop any existing ADK process
+            self.stop_adk_production()
+            
+            # Start ADK production system in background
+            print("🚀 Starting ADK production system in background...")
+            
+            # Test if uv is available
+            try:
+                subprocess.run(['uv', '--version'], capture_output=True, check=True, cwd=backend_path)
+                print("✅ uv command is available")
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                print(f"❌ uv command not found: {e}")
+                messagebox.showerror("Error", "uv command not found! Please install uv first.")
+                return
+            
+            # Create log files for debugging  
+            log_file = os.path.join(backend_path, 'adk_output.log')
+            error_file = os.path.join(backend_path, 'adk_error.log')
+            
+            # Set environment for UTF-8 encoding
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            
+            # Start with logging to files for debugging (with UTF-8 encoding)
+            with open(log_file, 'w', encoding='utf-8') as log_f, open(error_file, 'w', encoding='utf-8') as err_f:
+                self.adk_process = subprocess.Popen(
+                    ['uv', 'run', 'python', 'adk_production.py'],
+                    cwd=backend_path,
+                    stdout=log_f,
+                    stderr=err_f,
+                    env=env,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                )
+            
+            print(f"📝 Logs will be written to: {log_file}")
+            print(f"📝 Errors will be written to: {error_file}")
+            
+            print(f"✅ ADK production system started (PID: {self.adk_process.pid})")
+            
+            # Update status
+            self.session_subtitle.configure(text="ADK system active - webcam monitoring running in background!")
+            
+            # Update status indicator
+            self.status_label.configure(text="🔴 ADK System Running (Background)")
+            
+            # Check logs after a brief delay
+            self.root.after(3000, self.check_adk_logs)  # Check logs after 3 seconds
+            
+        except Exception as e:
+            print(f"❌ Error starting ADK production: {e}")
+            messagebox.showerror("Error", f"Failed to start ADK production system:\n{e}")
+    
+    def stop_adk_production(self):
+        """Stop the ADK production system and turn off camera"""
+        try:
+            print("🛑 Stopping ADK production system and turning off camera...")
+            
+            # Method 1: Stop our tracked process if it exists
+            if self.adk_process:
+                try:
+                    self.adk_process.terminate()
+                    self.adk_process.wait(timeout=3)
+                    print("✅ Tracked ADK process terminated")
+                except subprocess.TimeoutExpired:
+                    self.adk_process.kill()
+                    self.adk_process.wait(timeout=2)
+                    print("✅ Tracked ADK process killed")
+                except Exception as e:
+                    print(f"⚠️ Error stopping tracked process: {e}")
+                finally:
+                    self.adk_process = None
+            
+            # Method 2: Force kill any remaining ADK processes using Windows taskkill
+            try:
+                # First try to kill specific ADK processes
+                result1 = os.system('taskkill /f /im python.exe /fi "CommandLine like *adk_production*" 2>nul')
+                
+                # Then check for high-memory Python processes (likely ADK)
+                result2 = os.system('wmic process where "name=\'python.exe\' and WorkingSetSize>500000000" call terminate 2>nul')
+                
+                print("✅ Additional cleanup attempts completed")
+                
+            except Exception as e:
+                print(f"⚠️ Error in cleanup: {e}")
+                # Final fallback - kill all Python processes
+                try:
+                    print("🚨 Using emergency fallback - killing all Python processes...")
+                    os.system('taskkill /f /im python.exe 2>nul')
+                    print("🚫 Emergency fallback completed")
+                except:
+                    pass
+            
+            print("� Camera monitoring stopped - your camera is now OFF")
+            
+            # Update UI status if available
+            if hasattr(self, 'status_label'):
+                self.status_label.configure(text="Camera OFF")
+                
+                # Update UI to reflect camera is off
+                if hasattr(self, 'status_label'):
+                    self.status_label.configure(text="🔴 Camera Off")
+                
+        except Exception as e:
+            print(f"⚠️ Error stopping ADK production: {e}")
+            # Emergency fallback - kill any remaining processes
+            try:
+                os.system('taskkill /f /im python.exe 2>nul')
+                print("� Emergency camera shutdown completed")
+            except:
+                pass
+    
+    def pause_camera_monitoring(self):
+        """Pause camera monitoring without closing the main app"""
+        try:
+            print("⏸️ Pausing camera monitoring...")
+            
+            # Method 1: Stop our tracked ADK process
+            if self.adk_process:
+                try:
+                    self.adk_process.terminate()
+                    self.adk_process.wait(timeout=3)
+                    print("✅ ADK process terminated")
+                except subprocess.TimeoutExpired:
+                    self.adk_process.kill()
+                    self.adk_process.wait(timeout=2)
+                    print("✅ ADK process killed")
+                except Exception as e:
+                    print(f"⚠️ Error stopping ADK: {e}")
+                finally:
+                    self.adk_process = None
+            
+            # Method 2: Kill only high-memory Python processes (likely ADK), not all Python
+            try:
+                # Get current process PID to avoid killing ourselves
+                current_pid = os.getpid()
+                print(f"🛡️ Protecting main app (PID: {current_pid}) while stopping camera processes...")
+                
+                # Kill high-memory Python processes that aren't this app
+                os.system(f'wmic process where "name=\'python.exe\' and ProcessId!=\'{current_pid}\' and WorkingSetSize>500000000" call terminate 2>nul')
+                print("📷 Camera monitoring paused - app remains open")
+                
+            except Exception as e:
+                print(f"⚠️ Error in selective cleanup: {e}")
+                
+        except Exception as e:
+            print(f"⚠️ Error pausing camera monitoring: {e}")
+    
+    def camera_off(self):
+        """Turn off camera by stopping all monitoring processes"""
+        try:
+            print("� Turning off camera...")
+            
+            # Stop ADK production system
+            self.stop_adk_production()
+            
+            # Force kill ALL Python processes to guarantee camera shutdown
+            print("🔴 Force stopping all Python processes for guaranteed camera shutdown...")
+            os.system('taskkill /f /im python.exe')
+                
+            print("📷 Camera is now OFF - all processes terminated")
+            
+            # Update UI
+            if hasattr(self, 'status_label'):
+                self.status_label.configure(text="📷 Camera OFF")
+                
+        except Exception as e:
+            print(f"⚠️ Error turning off camera: {e}")
+            # Fallback - more aggressive shutdown
+            try:
+                os.system('taskkill /f /im python.exe 2>nul')
+                print("� Camera force-stopped")
+            except:
+                pass
+    
+    def on_closing(self):
+        """Handle application closing - ensures camera is turned off"""
+        # Stop ADK production system if running (turns off camera)
+        # Always ensure camera is off when closing
+        print("🚪 App closing - shutting down camera monitoring for privacy...")
+        self.camera_off()
+        
+        # Brief delay to ensure clean shutdown
+        import time
+        time.sleep(0.5)
+        
+        print("🚪 StraightUp app closed - camera monitoring disabled")
+        self.root.destroy()
+    
+    def check_adk_logs(self):
+        """Check ADK production logs for debugging"""
+        try:
+            backend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'backend')
+            log_file = os.path.join(backend_path, 'adk_output.log')
+            error_file = os.path.join(backend_path, 'adk_error.log')
+            
+            if os.path.exists(log_file):
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    log_content = f.read()[-500:]  # Last 500 chars
+                    if log_content.strip():
+                        print(f"📝 Last ADK output: {log_content[-100:]}")
+            
+            if os.path.exists(error_file):
+                with open(error_file, 'r', encoding='utf-8') as f:
+                    error_content = f.read()[-500:]  # Last 500 chars
+                    if error_content.strip():
+                        print(f"❌ ADK errors: {error_content[-100:]}")
+                        
+        except Exception as e:
+            print(f"⚠️ Error checking logs: {e}")
+    
+    def is_adk_running(self):
+        """Check if ADK production system is still running"""
+        if self.adk_process is None:
+            return False
+        
+        # Check if process is still alive
+        return self.adk_process.poll() is None
+    
     def open_session_setup(self):
         """Start session immediately (no setup popup)"""
         self.start_session()
-        
-        # Distraction tracking
-        distraction_label = tk.Label(
-            settings_frame,
-            text="Distraction tracking",
-            font=self.fonts['body'],
-            fg=self.colors['ink'],
-            bg=self.colors['card'],
-            anchor="w"
-        )
-        distraction_label.pack(fill="x", pady=(0, 5))
-        
-        distraction_var = tk.BooleanVar(value=True)
-        distraction_check = tk.Checkbutton(
-            settings_frame,
-            text="Alert for prolonged phone usage",
-            variable=distraction_var,
-            font=self.fonts['body'],
-            fg=self.colors['ink'],
-            bg=self.colors['card'],
-            selectcolor=self.colors['panel'],
-            activebackground=self.colors['card'],
-            activeforeground=self.colors['ink']
-        )
-        distraction_check.pack(fill="x", pady=(0, 20))
-        
-        # Buttons
-        button_frame = tk.Frame(content_frame, bg=self.colors['card'])
-        button_frame.pack(fill="x")
-        
-        start_btn = tk.Button(
-            button_frame,
-            text="Start session",
-            font=self.fonts['body'],
-            fg="white",
-            bg=self.colors['accent'],
-            relief='flat',
-            bd=0,
-            activebackground="#3730a3",
-            activeforeground="white",
-            command=lambda: self.start_session(setup_window)
-        )
-        start_btn.pack(side="left", padx=(0, 10))
-        
-        close_btn = tk.Button(
-            button_frame,
-            text="Close",
-            font=self.fonts['body'],
-            fg=self.colors['ink'],
-            bg=self.colors['card'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.colors['border'],
-            activebackground=self.colors['panel'],
-            activeforeground=self.colors['ink'],
-            command=setup_window.destroy
-        )
-        close_btn.pack(side="left")
     
     def start_session(self, setup_window=None):
         """Start a monitoring session"""
         if setup_window:
             setup_window.destroy()
+        
+        # Start ADK production system
+        self.start_adk_production()
         
         self.session_running = True
         self.session_paused = False
@@ -1165,14 +1373,23 @@ class ModernTkinterApp:
         self.session_paused = not self.session_paused
         
         if self.session_paused:
+            # Stop ADK system when paused (turns off camera)
+            print("⏸️ Pausing session - stopping camera monitoring...")
+            self.pause_camera_monitoring()
+            
             self.session_elapsed += (datetime.now() - self.session_start_time).total_seconds()
-            self.session_subtitle.configure(text="Resume when you're ready.")
+            self.session_subtitle.configure(text="Session paused - camera monitoring stopped.")
             self.pause_btn.configure(text="Resume")
             self.session_status_label.configure(text="Paused")
             self.status_dot.configure(fg=self.colors['warn'])
+            self.status_label.configure(text="🟡 Session Paused")
         else:
+            # Restart ADK system when resumed (turns on camera)
+            print("▶️ Resuming session - restarting camera monitoring...")
+            self.start_adk_production()
+            
             self.session_start_time = datetime.now()
-            self.session_subtitle.configure(text="Timer active. We're tracking posture and focus.")
+            self.session_subtitle.configure(text="Session resumed - camera monitoring active!")
             self.pause_btn.configure(text="Pause")
             self.session_status_label.configure(text="Running")
             self.status_dot.configure(fg=self.colors['danger'])
@@ -1188,12 +1405,16 @@ class ModernTkinterApp:
         if not self.session_paused:
             self.session_elapsed += (datetime.now() - self.session_start_time).total_seconds()
         
+        # Stop ADK production system (turns off camera)
+        print("🛑 Stopping session - shutting down camera monitoring...")
+        self.camera_off()
+        
         # Reset session state
         self.session_running = False
         self.session_paused = False
         
         # Update UI
-        self.session_subtitle.configure(text="Configure your session, then start. We'll time it and track progress.")
+        self.session_subtitle.configure(text="Session stopped - camera monitoring disabled. Ready for next session.")
         self.pause_btn.configure(
             state="disabled",
             text="Pause",

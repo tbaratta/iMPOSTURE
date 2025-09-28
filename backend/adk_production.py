@@ -1474,10 +1474,10 @@ if __name__ == "__main__":
     # Show agent architecture
     create_agent_dashboard()
     
-    print("\n🎮 CONTROLS:")
-    print("   Ctrl+C: Stop monitoring")
-    print("   Press Enter to start monitoring...")
-    input()
+    # print("\n🎮 CONTROLS:")
+    # print("   Ctrl+C: Stop monitoring")
+    # print("   Press Enter to start monitoring...")
+    # input()
     
     try:
         # Initialize and run the production system
