@@ -46,8 +46,9 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 4. Run the backend
     ```bash
     python backend/detector.py
+5. Insert Google ADK Instructions Here
 
-5. Open the dashboard
+6. Open the dashboard
 - **Navigate to frontend/dashboard.html in your browser**
 
 - **The dashboard will update in real time with posture alerts and wellness data**  
