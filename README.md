@@ -28,26 +28,26 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 
 ## ⚙️ Installation  
 
-1. Clone the repo**  
+1. Clone the repo  
    ```bash
    git clone https://github.com/your-username/StraightUp.git
    cd StraightUp
 
-2. **Set up virtual environment (recommended)
+2. Set up virtual environment (recommended)
     ```bash
     python -m venv .venv
     source .venv/bin/activate   # Mac/Linux
     .venv\Scripts\activate      # Windows
 
-3. **Install dependencies
+3. Install dependencies
    ```bash
    pip install -r requirements.txt
 
-4. **Run the backend
+4. Run the backend
     ```bash
     python backend/detector.py
 
-5. **Open the dashboard
+5. Open the dashboard
 - **Backend**: Python, Flask  
 - **AI / CV**: MediaPipe, YOLO  
 - **Frontend**: HTML, CSS, JavaScript (Dashboard)  
