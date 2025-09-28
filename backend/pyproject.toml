@@ -1,17 +1,19 @@
 [project]
-name = "straightup-enhanced-detection"
-version = "0.2.0"
-description = "🎯 StraightUp: Enhanced Pose Detection with Noise Monitoring - MediaPipe + YOLO11n + Audio Analysis"
+name = "straightup-integrated-detection"
+version = "0.3.0"
+description = "🎯 StraightUp: Integrated Detection System - MediaPipe + YOLO11n + Posture Analysis + System Actions"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-    "mediapipe==0.10.21",
-    "opencv-python==4.11.0.86",
-    "numpy>=1.26.4,<2.0.0",
-    "ultralytics>=8.3.0",
+    "mediapipe>=0.10.14",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "ultralytics>=8.0.0",
     "pyaudio>=0.2.11",
     "scipy>=1.11.0",
     "matplotlib>=3.7.0",
+    "google-adk>=1.14.1",
+    "win10toast>=0.9",
 ]
 
 [project.urls]
