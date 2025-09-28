@@ -614,6 +614,21 @@ wheels = [
 ]
 
 [[package]]
+name = "google-cloud-monitoring"
+version = "2.27.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/03/19/17b438b0fd628770ed01a79b8a2fcdbfb11a61a02bcdc769a225f50ea094/google_cloud_monitoring-2.27.2.tar.gz", hash = "sha256:d0f00205a5f94530dc72c3b96f681be14abdf1d6144dae5d2b922b54a90c43fa", size = 392827, upload-time = "2025-06-11T23:21:24.072Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/64/00a0027ee6bb6a69bc210037720477157e161ebcea20704c50fb0a7ba76f/google_cloud_monitoring-2.27.2-py3-none-any.whl", hash = "sha256:70b2e877d6267a3548ca17be301a4253fe83d4bebf7ea5cd8ee68b9dd3a70a02", size = 383687, upload-time = "2025-06-11T23:21:22.88Z" },
+]
+
+[[package]]
 name = "google-cloud-resource-manager"
 version = "1.14.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2115,6 +2130,8 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "google-adk" },
+    { name = "google-cloud-logging" },
+    { name = "google-cloud-monitoring" },
     { name = "matplotlib" },
     { name = "mediapipe" },
     { name = "numpy" },
@@ -2128,6 +2145,8 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "google-adk", specifier = ">=1.14.1" },
+    { name = "google-cloud-logging", specifier = ">=3.12.1" },
+    { name = "google-cloud-monitoring", specifier = ">=2.27.2" },
     { name = "matplotlib", specifier = ">=3.7.0" },
     { name = "mediapipe", specifier = ">=0.10.14" },
     { name = "numpy", specifier = ">=1.24.0" },
