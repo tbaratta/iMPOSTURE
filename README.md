@@ -48,10 +48,9 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
     python backend/detector.py
 
 5. Open the dashboard
-- **Backend**: Python, Flask  
-- **AI / CV**: MediaPipe, YOLO  
-- **Frontend**: HTML, CSS, JavaScript (Dashboard)  
-- **Other**: OpenCV, NumPy  
+- **Navigate to frontend/dashboard.html in your browser**
+
+- **The dashboard will update in real time with posture alerts and wellness data**  
 
 ## 🎯 Usage
 
