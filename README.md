@@ -46,7 +46,16 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 4. Run the backend
     ```bash
     python backend/detector.py
+    
 5. Insert Google ADK Instructions Here
+
+- **If you want to stream and analyze Google ADK (Android Developer Kit) logs with StraightUp**
+
+- **Make sure Android Debug Bridge (ADB) is installed and available in your PATH**
+
+- **Enable Developer Options and USB Debugging on your Android device**
+
+- **Connect your device via USB (or Wi-Fi if configured)**
 
 6. Open the dashboard
 - **Navigate to frontend/dashboard.html in your browser**
