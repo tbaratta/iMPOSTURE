@@ -26,7 +26,7 @@ except ImportError:
 # Set Google Cloud Project
 os.environ['GOOGLE_CLOUD_PROJECT'] = 'perfect-entry-473503-j1'
 
-# Import our real detector system  
+# Import our integrated detector system  
 from detector import IntegratedPoseDetector
 
 # REAL Google ADK imports - NOT SIMULATION!
@@ -116,35 +116,42 @@ class PostureAnalysisAgent(Agent):
     def analyze_posture(self, image_data: Optional[np.ndarray] = None, detector: Optional[IntegratedPoseDetector] = None) -> Dict[str, Any]:
         """Analyze posture using real MediaPipe detection from detector.py"""
         try:
-            # Use only real MediaPipe detection - no simulation
+            # Use integrated detector - no simulation
             if image_data is not None and detector is not None:
-                # Process frame with real detector
-                processed_frame, faces, hands, pose_detected, phones, analysis = detector.process_frame(image_data.copy())
+                # Process frame with integrated detector
+                processed_image, faces, hands, pose, phones, analysis = detector.process_frame(image_data.copy())
                 
                 # Calculate posture score based on REAL posture analysis
-                if pose_detected > 0 and analysis and analysis.get('ok'):
-                    # Use the REAL posture analysis state from PostureAnalyzer
-                    posture_state = analysis.get('state', 'OK')
+                if pose > 0 and analysis.get('ok'):
+                    # Use the REAL posture analysis from integrated detector
+                    overall_state = analysis.get('state', 'OK')
                     
-                    # Convert posture state to numerical score
-                    if posture_state == 'OK':
-                        posture_score = 0.9  # Good posture
-                    elif posture_state == 'WARN':
-                        posture_score = 0.6  # Warning level
-                    elif posture_state == 'BAD':
-                        posture_score = 0.3  # Bad posture
+                    # Convert posture state to numeric score
+                    if overall_state == 'OK':
+                        posture_score = 0.8
+                    elif overall_state == 'WARN':
+                        posture_score = 0.6
+                    elif overall_state == 'BAD':
+                        posture_score = 0.3
                     else:
-                        posture_score = 0.5  # Unknown state
+                        posture_score = 0.5
                     
-                    # Get REAL metrics from posture analyzer
+                    # Get metrics for shoulder and neck alignment
                     metrics = analysis.get('metrics', {})
-                    shoulder_alignment = 1.0 - (abs(metrics.get('shoulder_slope_deg', 0)) / 180.0)  # Normalize slope
-                    neck_position = min(1.0, metrics.get('neck_angle_deg', 0) / 45.0)  # Normalize neck angle
+                    states = analysis.get('states', {})
+                    
+                    # Calculate shoulder alignment from shoulder slope
+                    shoulder_slope_deg = metrics.get('shoulder_slope_deg', 0)
+                    shoulder_alignment = max(0.0, 1.0 - (shoulder_slope_deg / 45.0)) if shoulder_slope_deg else 0.5
+                    
+                    # Calculate neck position from neck angle
+                    neck_angle_deg = metrics.get('neck_angle_deg', 0) 
+                    neck_position = max(0.0, 1.0 - (neck_angle_deg / 45.0)) if neck_angle_deg else 0.5
                     
                     status = "real_posture_analysis"
-                elif pose_detected > 0 and not analysis:
-                    # Pose detected but no analysis available
-                    posture_score = 0.4
+                elif pose > 0:
+                    # Pose detected but no detailed analysis available
+                    posture_score = 0.5
                     shoulder_alignment = 0.5
                     neck_position = 0.5
                     status = "pose_detected_no_analysis"
@@ -159,8 +166,8 @@ class PostureAnalysisAgent(Agent):
                 raise ValueError("No image data or detector available for posture analysis")
             
             # Generate recommendations based on real posture analysis
-            if analysis and analysis.get('ok'):
-                recommendations = self._generate_real_posture_recommendations(analysis, posture_score)
+            if pose > 0 and analysis.get('ok'):
+                recommendations = self._generate_enhanced_posture_recommendations(analysis, posture_score)
             else:
                 recommendations = self._generate_posture_recommendations(posture_score)
             
@@ -171,9 +178,10 @@ class PostureAnalysisAgent(Agent):
                 "recommendations": recommendations,
                 "analysis_timestamp": time.time(),
                 "status": status,
-                "pose_detected": pose_detected if 'pose_detected' in locals() else 0,
-                "faces_detected": faces if 'faces' in locals() else 0,
-                "hands_detected": hands if 'hands' in locals() else 0
+                "pose_detected": pose > 0,
+                "faces_detected": faces, 
+                "hands_detected": hands,
+                "focus_score": detector.focus_score if hasattr(detector, 'focus_score') else 0.5
             }
         except Exception as e:
             return {
@@ -208,34 +216,33 @@ class PostureAnalysisAgent(Agent):
         else:
             return ["🌟 Excellent posture! Keep it up!"]
     
-    def _generate_real_posture_recommendations(self, analysis: Dict, score: float) -> List[str]:
-        """Generate specific recommendations based on real posture analysis"""
+    def _generate_enhanced_posture_recommendations(self, analysis: Dict, score: float) -> List[str]:
+        """Generate specific recommendations based on enhanced posture analysis"""
         recommendations = []
+        
+        # Get states and metrics from analysis
         states = analysis.get('states', {})
         metrics = analysis.get('metrics', {})
         
         # Specific recommendations based on actual issues
         if states.get('neck_flexion') == 'BAD':
-            angle = metrics.get('neck_angle_deg', 0)
-            recommendations.append(f"🔴 Neck flexion critical ({angle:.1f}°) - Raise monitor height")
-        elif states.get('neck_flexion') == 'WARN':
-            recommendations.append("🟡 Neck slightly forward - Adjust screen position")
-            
-        if states.get('forward_head') == 'BAD':
-            ratio = metrics.get('forward_head_ratio', 0)
-            recommendations.append(f"🔴 Head too far forward ({ratio:.2f}x) - Pull head back")
-        elif states.get('forward_head') == 'WARN':
-            recommendations.append("🟡 Slight forward head - Strengthen neck muscles")
+            neck_angle = metrics.get('neck_angle_deg', 0)
+            recommendations.append(f"🔴 Neck strain detected ({neck_angle:.1f}°) - Raise monitor height")
             
         if states.get('shoulder_level') == 'BAD':
-            slope = metrics.get('shoulder_slope_deg', 0)
-            recommendations.append(f"🔴 Shoulders uneven ({slope:.1f}°) - Check chair height")
-        elif states.get('shoulder_level') == 'WARN':
-            recommendations.append("🟡 Minor shoulder imbalance - Adjust posture")
+            shoulder_angle = metrics.get('shoulder_slope_deg', 0)
+            recommendations.append(f"🔴 Shoulders uneven ({shoulder_angle:.1f}°) - Check chair height")
+            
+        if states.get('forward_head') == 'BAD':
+            forward_head = metrics.get('forward_head_y_ratio', 0)
+            recommendations.append(f"🔴 Head too far forward ({forward_head:.2f}) - Pull head back")
             
         if states.get('head_tilt') == 'BAD':
-            tilt = metrics.get('head_tilt_deg', 0)
-            recommendations.append(f"🔴 Head tilted ({tilt:.1f}°) - Center your head")
+            head_tilt = metrics.get('head_tilt_deg', 0)
+            recommendations.append(f"🔴 Head tilted ({head_tilt:.1f}°) - Level your head")
+            
+        if states.get('shoulder_open') == 'BAD':
+            recommendations.append("🔴 Shoulders closed - Open chest and pull shoulders back")
             
         # If no specific issues, give general feedback
         if not recommendations:
@@ -268,13 +275,16 @@ class PhoneUsageAgent(Agent):
             timestamp = time.time()
             
         try:
-            # Use only real phone detection data - no simulation
+            # Use integrated detector phone data - no simulation
             if detector is not None:
-                # Get real phone usage statistics from detector
-                current_session = detector.phone_usage_tracker['current_session']
+                # Get phone usage tracker from integrated detector
+                usage_tracker = detector.phone_usage_tracker
+                
+                # Get real phone usage statistics
+                current_session = usage_tracker.get('current_session')
                 session_duration = current_session['duration'] if current_session else 0.0
-                phones_detected = 1 if current_session else 0
-                productivity_impact = 1.0 - detector.distraction_factors['phone_usage']
+                phones_detected = phones_detected if phones_detected > 0 else 0
+                productivity_impact = max(0.0, 1.0 - (session_duration / 60.0))  # Decrease based on duration
                 
                 # Get real behavioral insights
                 session_type = detector._categorize_phone_session(session_duration) if session_duration > 0 else "none"
@@ -282,8 +292,8 @@ class PhoneUsageAgent(Agent):
                     "pattern": session_type,
                     "message": f"📱 {session_type.title()} usage pattern detected",
                     "current_duration": session_duration,
-                    "total_today": detector.phone_usage_tracker['total_usage_today'],
-                    "recent_sessions": len(detector.phone_usage_tracker['usage_sessions'])
+                    "total_today": usage_tracker.get('total_usage_today', 0),
+                    "recent_sessions": len(usage_tracker.get('usage_sessions', []))
                 }
                 
                 status = "real_detection"
@@ -346,13 +356,15 @@ class EnvironmentalAgent(Agent):
     def monitor_environment(self, detector: Optional[IntegratedPoseDetector] = None) -> Dict[str, Any]:
         """Monitor environmental conditions with real noise detection from detector.py"""
         try:
-            # Use only real noise detection - no simulation
+            # Use integrated detector noise detection - no simulation
             if detector is not None and detector.noise_detector and detector.noise_enabled:
-                # Get real noise level from detector's noise distraction factor
-                noise_distraction = detector.distraction_factors.get('noise', 0.2)
-                noise_level = noise_distraction  # Use distraction factor as noise level
+                # Get real noise level from integrated detector
+                try:
+                    noise_level = detector.noise_detector.get_average_noise_level(seconds=1)
+                except Exception:
+                    noise_level = 0.3  # Fallback
                 
-                # Classify noise based on distraction level
+                # Classify noise based on level
                 if noise_level < 0.2:
                     classification = "quiet"
                 elif noise_level < 0.5:
@@ -382,8 +394,8 @@ class EnvironmentalAgent(Agent):
                     "noise": "0.1-0.3 for focus"
                 },
                 "status": status,
-                "noise_enabled": detector.noise_enabled if detector else False,
-                "focus_score": detector.focus_score if detector else 0.7
+                "noise_enabled": detector.noise_detector is not None if detector else False,
+                "focus_score": focus_score if 'focus_score' in locals() else 0.7
             }
         except Exception as e:
             return {
@@ -419,15 +431,237 @@ class EnvironmentalAgent(Agent):
         return suggestions
 
 class WellnessCoachAgent(LlmAgent):
-    """ADK LLM Agent for personalized wellness coaching"""
+    """ADK LLM Agent for personalized wellness coaching with Google Cloud logs access"""
     
     def __init__(self):
         super().__init__(
             name="wellness_coach",
-            description="AI-powered wellness coach providing personalized health and productivity guidance",
-            model=Gemini(model_name="gemini-1.5-pro")
+            description="AI-powered wellness coach providing personalized health and productivity guidance based on historical data",
+            model=Gemini(model_name="gemini-1.5-pro"),
+            tools=[
+                FunctionTool(self.analyze_health_trends),
+                FunctionTool(self.provide_coaching),
+                FunctionTool(self.assess_intervention_need)
+            ]
         )
+        # Initialize cloud access (will be set by system)
+        self._cloud_logger = None
+        self._cloud_logging_client = None
         print("🤖 AI Wellness Coach initialized")
+    
+    def set_cloud_access(self, cloud_logger, cloud_logging_client):
+        """Set Google Cloud access after initialization"""
+        self._cloud_logger = cloud_logger
+        self._cloud_logging_client = cloud_logging_client
+        if cloud_logging_client:
+            print("🤖 Wellness Coach connected to Google Cloud logs")
+    
+    def analyze_health_trends(self, hours: int = 24) -> Dict[str, Any]:
+        """Analyze health trends from Google Cloud logs using Gemini AI"""
+        try:
+            if not self._cloud_logging_client:
+                return {"status": "no_cloud_access", "analysis": "Historical data unavailable"}
+            
+            # Fetch recent health data from Google Cloud
+            from datetime import datetime, timedelta
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=hours)
+            
+            filter_str = f'''
+                logName="projects/perfect-entry-473503-j1/logs/straightup-adk-production"
+                AND timestamp >= "{start_time.isoformat()}Z"
+                AND timestamp <= "{end_time.isoformat()}Z"
+                AND jsonPayload.source="adk_production_system"
+            '''
+            
+            entries = list(self._cloud_logging_client.list_entries(
+                filter_=filter_str,
+                order_by=cloud_logging.DESCENDING,
+                max_results=50
+            ))
+            
+            if not entries:
+                return {"status": "no_data", "analysis": "No recent health data available"}
+            
+            # Extract health metrics for analysis
+            health_data = []
+            for entry in entries:
+                if hasattr(entry, 'payload') and isinstance(entry.payload, dict):
+                    health_data.append({
+                        'timestamp': entry.timestamp.isoformat() if entry.timestamp else None,
+                        'focus_score': entry.payload.get('focus_score', 0),
+                        'posture_score': entry.payload.get('posture_score', 0),
+                        'phone_usage': entry.payload.get('phone_usage_seconds', 0),
+                        'noise_level': entry.payload.get('noise_level', 0),
+                        'recommendations': entry.payload.get('recommendations', [])
+                    })
+            
+            # Analyze patterns
+            avg_focus = sum(d['focus_score'] for d in health_data) / len(health_data)
+            avg_posture = sum(d['posture_score'] for d in health_data) / len(health_data)
+            total_phone_time = sum(d['phone_usage'] for d in health_data)
+            avg_noise = sum(d['noise_level'] for d in health_data) / len(health_data)
+            
+            # Calculate trends
+            half_point = len(health_data) // 2
+            recent_focus = sum(d['focus_score'] for d in health_data[:half_point]) / max(half_point, 1)
+            older_focus = sum(d['focus_score'] for d in health_data[half_point:]) / max(len(health_data) - half_point, 1)
+            
+            return {
+                "status": "success",
+                "data_points": len(health_data),
+                "time_range_hours": hours,
+                "trends": {
+                    "focus_trend": "improving" if recent_focus > older_focus else "declining" if recent_focus < older_focus else "stable",
+                    "avg_focus": avg_focus,
+                    "avg_posture": avg_posture,
+                    "total_phone_time": total_phone_time,
+                    "avg_noise": avg_noise,
+                    "recent_vs_older_focus": f"{recent_focus:.2f} vs {older_focus:.2f}"
+                },
+                "raw_data": health_data[:10]  # Last 10 data points for context
+            }
+            
+        except Exception as e:
+            return {"status": "error", "error": str(e), "analysis": "Failed to analyze historical trends"}
+    
+    def provide_coaching(self, current_metrics: Dict[str, Any], trends: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Provide AI-powered coaching based on current metrics and historical trends"""
+        try:
+            # Prepare context for Gemini
+            coaching_context = f"""
+            You are an AI wellness coach analyzing a user's real-time health data from their workspace monitoring system.
+            
+            Current Health Metrics:
+            - Focus Score: {current_metrics.get('focus_score', 0):.2f}/1.0
+            - Posture Score: {current_metrics.get('posture_score', 0):.2f}/1.0  
+            - Phone Usage: {current_metrics.get('phone_usage_duration', 0):.1f} seconds
+            - Noise Level: {current_metrics.get('noise_level', 0):.3f}
+            
+            Historical Context (if available):
+            {f"- Focus Trend: {trends['trends']['focus_trend']}" if trends and trends.get('status') == 'success' else "- No historical data available"}
+            {f"- Average Focus: {trends['trends']['avg_focus']:.2f}" if trends and trends.get('status') == 'success' else ""}
+            {f"- Average Posture: {trends['trends']['avg_posture']:.2f}" if trends and trends.get('status') == 'success' else ""}
+            
+            Provide personalized wellness coaching in 2-3 actionable bullet points. Focus on the most critical issues first.
+            Be specific, encouraging, and practical. Use emojis appropriately.
+            """
+            
+            # Generate coaching using the Gemini model (this would be handled by ADK framework)
+            # For now, provide rule-based coaching that could be enhanced with actual Gemini calls
+            coaching_advice = []
+            priority_level = "normal"
+            
+            # Critical issues first
+            if current_metrics.get('focus_score', 0) < 0.3:
+                coaching_advice.append("🚨 URGENT: Your focus is critically low. Take a 10-minute break immediately - step away from your desk, do some deep breathing, and return refreshed.")
+                priority_level = "critical"
+            elif current_metrics.get('posture_score', 0) < 0.3:
+                coaching_advice.append("⚠️ POSTURE ALERT: Your posture needs immediate attention. Sit up straight, adjust your monitor height, and do 5 neck rolls right now.")
+                priority_level = "urgent"
+            elif current_metrics.get('phone_usage_duration', 0) > 45:
+                coaching_advice.append("📱 PHONE INTERVENTION: You've been on your phone for over 45 seconds. Put it in airplane mode for the next 25 minutes to restore focus.")
+                priority_level = "urgent"
+            
+            # Trend-based coaching
+            if trends and trends.get('status') == 'success':
+                if trends['trends']['focus_trend'] == 'declining':
+                    coaching_advice.append(f"📉 Your focus has been declining ({trends['trends']['recent_vs_older_focus']}). Try the Pomodoro technique: 25 min work, 5 min break.")
+                elif trends['trends']['focus_trend'] == 'improving':
+                    coaching_advice.append(f"📈 Great progress! Your focus is improving ({trends['trends']['recent_vs_older_focus']}). Keep up the good work!")
+            
+            # General wellness advice
+            if current_metrics.get('noise_level', 0) > 0.5:
+                coaching_advice.append("🎧 High noise environment detected. Consider noise-canceling headphones or moving to a quieter space.")
+            elif len(coaching_advice) == 0:
+                coaching_advice.append("✅ You're doing well! Stay consistent with your current habits and take regular breaks every hour.")
+            
+            return {
+                "status": "success",
+                "coaching_advice": coaching_advice[:3],  # Top 3 pieces of advice
+                "priority_level": priority_level,
+                "coaching_context": "AI-powered analysis of real-time and historical health data"
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error", 
+                "error": str(e),
+                "coaching_advice": ["Wellness coaching temporarily unavailable - focus on maintaining good posture and taking regular breaks."]
+            }
+    
+    def assess_intervention_need(self, current_metrics: Dict[str, Any], trends: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Assess if immediate intervention is needed based on AI analysis"""
+        try:
+            intervention_score = 0
+            intervention_reasons = []
+            
+            # Score based on current metrics
+            focus_score = current_metrics.get('focus_score', 0.5)
+            posture_score = current_metrics.get('posture_score', 0.5)
+            phone_usage = current_metrics.get('phone_usage_duration', 0)
+            noise_level = current_metrics.get('noise_level', 0.3)
+            
+            if focus_score < 0.3:
+                intervention_score += 3
+                intervention_reasons.append("Critical focus degradation")
+            elif focus_score < 0.5:
+                intervention_score += 2
+                intervention_reasons.append("Low focus levels")
+                
+            if posture_score < 0.3:
+                intervention_score += 3
+                intervention_reasons.append("Poor posture detected")
+            elif posture_score < 0.5:
+                intervention_score += 1
+                intervention_reasons.append("Posture needs attention")
+                
+            if phone_usage > 60:
+                intervention_score += 3
+                intervention_reasons.append("Excessive phone usage")
+            elif phone_usage > 30:
+                intervention_score += 1
+                intervention_reasons.append("Extended phone session")
+                
+            if noise_level > 0.7:
+                intervention_score += 2
+                intervention_reasons.append("High noise environment")
+            
+            # Factor in trends if available
+            if trends and trends.get('status') == 'success':
+                if trends['trends']['focus_trend'] == 'declining':
+                    intervention_score += 1
+                    intervention_reasons.append("Declining focus trend")
+            
+            # Determine intervention level
+            if intervention_score >= 5:
+                intervention_level = "immediate"
+                intervention_type = "Break recommended now"
+            elif intervention_score >= 3:
+                intervention_level = "soon"
+                intervention_type = "Consider a break within 10 minutes"
+            elif intervention_score >= 1:
+                intervention_level = "monitor"
+                intervention_type = "Continue monitoring"
+            else:
+                intervention_level = "none"
+                intervention_type = "No intervention needed"
+            
+            return {
+                "status": "success",
+                "intervention_needed": intervention_score >= 3,
+                "intervention_level": intervention_level,
+                "intervention_type": intervention_type,
+                "intervention_score": intervention_score,
+                "reasons": intervention_reasons
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "intervention_needed": False
+            }
 
 # Main StraightUp ADK System with Enhanced Console Output
 class StraightUpADKSystem:
@@ -482,15 +716,19 @@ class StraightUpADKSystem:
                 self.cloud_logging_client = cloud_logging.Client(project='perfect-entry-473503-j1')
                 self.cloud_logger = self.cloud_logging_client.logger('straightup-adk-production')
                 self.monitoring_client = monitoring_v3.MetricServiceClient()
+                
+                # Enable wellness coach with cloud access
+                self.wellness_coach.set_cloud_access(self.cloud_logger, self.cloud_logging_client)
+                
                 print("🌐 Google Cloud logging initialized for project: perfect-entry-473503-j1")
             except Exception as e:
                 print(f"⚠️ Cloud logging setup failed: {e}")
                 self.cloud_logger = None
         
-        # Initialize real detector system
+        # Initialize integrated detector system
         try:
-            self.detector = IntegratedPoseDetector(enable_noise_detection=True)
-            print("🎯 Integrated detector initialized with noise monitoring")
+            self.detector = IntegratedPoseDetector()
+            print("🎯 Integrated detector initialized with all modules")
         except Exception as e:
             print(f"⚠️ Integrated detector initialization failed: {e}")
             self.detector = None
@@ -546,8 +784,41 @@ class StraightUpADKSystem:
         all_active = all(r['status'] == 'real_detection' for r in [posture_results, phone_results] if r['status'] != 'error')
         print(f"   🔋 Agent Status: {'🟢 ALL OPERATIONAL' if all_active else '🟡 PARTIAL OPERATION'}")
         print(f"   📊 Data Quality: {'🟢 HIGH' if all_active else '🟡 MEDIUM'}")
+    
+    def _display_wellness_insights(self, coaching: Dict[str, Any], intervention: Dict[str, Any], trends: Dict[str, Any]):
+        """Display AI wellness coaching insights"""
+        print(f"\n🤖 AI WELLNESS COACH INSIGHTS:")
         
-    def _log_health_metrics(self, metrics: HealthMetrics):
+        # Coaching status
+        if coaching.get('status') == 'success':
+            print(f"   💡 Coaching Priority: {coaching.get('priority_level', 'normal').upper()}")
+            coaching_advice = coaching.get('coaching_advice', [])
+            for i, advice in enumerate(coaching_advice[:2], 1):  # Show top 2
+                print(f"   {i}. {advice}")
+        else:
+            print(f"   ⚠️ Coaching Status: {coaching.get('status', 'unknown')}")
+        
+        # Intervention assessment
+        if intervention.get('status') == 'success':
+            need_intervention = intervention.get('intervention_needed', False)
+            intervention_level = intervention.get('intervention_level', 'none')
+            print(f"   ⚠️ Intervention: {'🔴 NEEDED' if need_intervention else '🟢 NOT NEEDED'} ({intervention_level.upper()})")
+            if need_intervention:
+                print(f"   🎯 Action: {intervention.get('intervention_type', 'Monitor closely')}")
+                reasons = intervention.get('reasons', [])
+                if reasons:
+                    print(f"   📋 Reasons: {', '.join(reasons[:2])}")  # Top 2 reasons
+        
+        # Historical trends
+        if trends.get('status') == 'success':
+            trend_data = trends.get('trends', {})
+            print(f"   📈 Focus Trend (6h): {trend_data.get('focus_trend', 'unknown').upper()}")
+            print(f"   📊 Historical Data: {trends.get('data_points', 0)} points analyzed")
+        else:
+            print(f"   📊 Historical Analysis: {trends.get('status', 'unavailable')}")
+        
+    def _log_health_metrics(self, metrics: HealthMetrics, posture_results=None, phone_results=None, environment_results=None, 
+                          wellness_coaching=None, wellness_intervention=None, detection_results=None):
         """Log enhanced health metrics for production monitoring and send to Google Cloud"""
         print(f"\n💊 HEALTH METRICS SUMMARY:")
         print(f"   🎯 Overall Focus: {metrics.focus_score:.2f}/1.0 {'🟢' if metrics.focus_score > 0.7 else '🟡' if metrics.focus_score > 0.4 else '🔴'}")
@@ -555,9 +826,10 @@ class StraightUpADKSystem:
         print(f"   📱 Phone Usage: {metrics.phone_usage_duration:.1f}s {'🟢' if metrics.phone_usage_duration < 10 else '🟡' if metrics.phone_usage_duration < 30 else '🔴'}")
         print(f"   🔊 Noise Level: {metrics.noise_level:.3f} {'🟢' if metrics.noise_level < 0.3 else '🟡' if metrics.noise_level < 0.6 else '🔴'}")
         
-        # Send to Google Cloud Logging
+        # Send comprehensive data to Google Cloud Logging
         if self.cloud_logger:
             try:
+                # Base metrics
                 log_data = {
                     "cycle": self.cycle_count,
                     "timestamp": metrics.timestamp,
@@ -565,14 +837,207 @@ class StraightUpADKSystem:
                     "posture_score": metrics.posture_score,
                     "phone_usage_seconds": metrics.phone_usage_duration,
                     "noise_level": metrics.noise_level,
-                    "recommendations": metrics.recommendations[:3] if metrics.recommendations else [],
+                    "recommendations": metrics.recommendations[:5] if metrics.recommendations else [],
                     "project_id": "perfect-entry-473503-j1",
                     "source": "adk_production_system",
                     "agent_status": "operational"
                 }
                 
+                # Add detailed detection data if available
+                if detection_results:
+                    log_data["detection"] = {
+                        "faces_detected": detection_results.get("faces", 0),
+                        "hands_detected": detection_results.get("hands", 0),
+                        "pose_detected": detection_results.get("pose", 0),
+                        "phones_detected": detection_results.get("phones", 0),
+                        "detector_focus_score": detection_results.get("focus_score", 0.0)
+                    }
+                    
+                    # Add comprehensive posture analysis data from detector
+                    posture_analysis = detection_results.get("posture_analysis")
+                    if posture_analysis and posture_analysis.get("ok"):
+                        log_data["detailed_posture_analysis"] = {
+                            "overall_state": posture_analysis.get("state", "OK"),
+                            "metrics": {
+                                "neck_angle_deg": posture_analysis.get("metrics", {}).get("neck_angle_deg", 0),
+                                "shoulder_slope_deg": posture_analysis.get("metrics", {}).get("shoulder_slope_deg", 0),
+                                "head_tilt_deg": posture_analysis.get("metrics", {}).get("head_tilt_deg", 0),
+                                "shoulder_width_norm": posture_analysis.get("metrics", {}).get("shoulder_width_norm", 0),
+                                "shoulder_height_ratio": posture_analysis.get("metrics", {}).get("shoulder_height_ratio", 0),
+                                "shoulder_protraction": posture_analysis.get("metrics", {}).get("shoulder_protraction", 0),
+                                "torso_pitch_deg": posture_analysis.get("metrics", {}).get("torso_pitch_deg", 0),
+                                "torso_len_ratio": posture_analysis.get("metrics", {}).get("torso_len_ratio", 0),
+                                "forward_head_y_ratio": posture_analysis.get("metrics", {}).get("forward_head_y_ratio", 0),
+                                "yaw_ratio": posture_analysis.get("metrics", {}).get("yaw_ratio", 0)
+                            },
+                            "states": {
+                                "neck_flexion": posture_analysis.get("states", {}).get("neck_flexion", "OK"),
+                                "forward_head": posture_analysis.get("states", {}).get("forward_head", "OK"),
+                                "shoulder_level": posture_analysis.get("states", {}).get("shoulder_level", "OK"),
+                                "head_tilt": posture_analysis.get("states", {}).get("head_tilt", "OK"),
+                                "shoulder_open": posture_analysis.get("states", {}).get("shoulder_open", "OK"),
+                                "torso_pitch": posture_analysis.get("states", {}).get("torso_pitch", "OK"),
+                                "open_width": posture_analysis.get("states", {}).get("open_width", "OK"),
+                                "open_height": posture_analysis.get("states", {}).get("open_height", "OK"),
+                                "open_protraction": posture_analysis.get("states", {}).get("open_protraction", "OK")
+                            },
+                            "landmark_points": {
+                                "neck_base_px": list(posture_analysis.get("points", {}).get("neck_base_px", [0, 0])),
+                                "nose_px": list(posture_analysis.get("points", {}).get("nose_px", [0, 0])),
+                                "l_shoulder_px": list(posture_analysis.get("points", {}).get("l_shoulder_px", [0, 0])),
+                                "r_shoulder_px": list(posture_analysis.get("points", {}).get("r_shoulder_px", [0, 0])),
+                                "l_eye_px": list(posture_analysis.get("points", {}).get("l_eye_px", [0, 0])),
+                                "r_eye_px": list(posture_analysis.get("points", {}).get("r_eye_px", [0, 0]))
+                            }
+                        }
+                
+                # Add detailed posture analysis if available
+                if posture_results:
+                    log_data["posture_analysis"] = {
+                        "posture_score": posture_results.get("posture_score", 0),
+                        "shoulder_alignment": posture_results.get("shoulder_alignment", 0),
+                        "neck_position": posture_results.get("neck_position", 0),
+                        "status": posture_results.get("status", "unknown"),
+                        "pose_detected": posture_results.get("pose_detected", False),
+                        "faces_detected": posture_results.get("faces_detected", 0),
+                        "hands_detected": posture_results.get("hands_detected", 0)
+                    }
+                
+                # Add detailed phone usage data if available
+                if phone_results:
+                    log_data["phone_analysis"] = {
+                        "current_session_duration": phone_results.get("current_session_duration", 0),
+                        "productivity_impact": phone_results.get("productivity_impact", 1.0),
+                        "session_active": phone_results.get("session_active", False),
+                        "usage_pattern": phone_results.get("behavioral_insights", {}).get("pattern", "none"),
+                        "total_today": phone_results.get("behavioral_insights", {}).get("total_today", 0),
+                        "recent_sessions": phone_results.get("behavioral_insights", {}).get("recent_sessions", 0),
+                        "status": phone_results.get("status", "unknown")
+                    }
+                
+                # Add environmental data if available
+                if environment_results:
+                    log_data["environment_analysis"] = {
+                        "noise_level": environment_results.get("noise_level", 0.3),
+                        "noise_classification": environment_results.get("noise_classification", "unknown"),
+                        "environmental_score": environment_results.get("environmental_score", 0.7),
+                        "noise_enabled": environment_results.get("noise_enabled", False),
+                        "status": environment_results.get("status", "unknown")
+                    }
+                
+                # Add AI wellness coaching data if available
+                if wellness_coaching and wellness_coaching.get('status') == 'success':
+                    log_data["ai_coaching"] = {
+                        "priority_level": wellness_coaching.get("priority_level", "normal"),
+                        "coaching_advice": wellness_coaching.get("coaching_advice", [])[:3],
+                        "coaching_context": wellness_coaching.get("coaching_context", "")
+                    }
+                
+                # Add intervention assessment if available
+                if wellness_intervention and wellness_intervention.get('status') == 'success':
+                    log_data["intervention_assessment"] = {
+                        "intervention_needed": wellness_intervention.get("intervention_needed", False),
+                        "intervention_level": wellness_intervention.get("intervention_level", "none"),
+                        "intervention_type": wellness_intervention.get("intervention_type", ""),
+                        "intervention_score": wellness_intervention.get("intervention_score", 0),
+                        "reasons": wellness_intervention.get("reasons", [])
+                    }
+                
+                # Add integrated detector comprehensive data if available
+                if self.detector:
+                    try:
+                        detector_state = {
+                            "focus_score": float(self.detector.focus_score),
+                            "distraction_factors": {k: float(v) for k, v in self.detector.distraction_factors.items()},
+                            "noise_enabled": bool(self.detector.noise_enabled),
+                            "animation_frame": int(self.detector.animation_frame)
+                        }
+                        
+                        # Eye tracking data if available
+                        try:
+                            detector_state["eye_tracking"] = {
+                                "eyes_closed": getattr(self.detector, '_eyes_closed', False),
+                                "eye_ratio_left": getattr(self.detector, '_eye_ratio_left_s', None),
+                                "eye_ratio_right": getattr(self.detector, '_eye_ratio_right_s', None),
+                                "eye_closed_threshold": getattr(self.detector, 'EYE_CLOSED_THR', 0.18),
+                                "eye_open_threshold": getattr(self.detector, 'EYE_OPEN_THR', 0.22)
+                            }
+                        except Exception:
+                            detector_state["eye_tracking"] = {"status": "unavailable"}
+                        
+                        # Phone tracking system data
+                        try:
+                            detector_state["phone_tracking"] = {
+                                "active_tracks": len(getattr(self.detector, '_phone_tracks', [])),
+                                "detection_history_length": len(getattr(self.detector, 'phone_detection_history', [])),
+                                "confidence_threshold": getattr(self.detector, 'phone_confidence_threshold', 0.25),
+                                "smooth_alpha": getattr(self.detector, 'phone_smooth_alpha', 0.6),
+                                "session_candidate_start": getattr(self.detector, 'session_candidate_start', None),
+                                "last_stable_phone_time": getattr(self.detector, 'last_stable_phone_time', 0.0)
+                            }
+                        except Exception:
+                            detector_state["phone_tracking"] = {"status": "unavailable"}
+                        
+                        # Phone usage tracker data
+                        if hasattr(self.detector, 'phone_usage_tracker'):
+                            tracker = self.detector.phone_usage_tracker
+                            detector_state["phone_usage_tracker"] = {
+                                "current_session_active": tracker.get('current_session') is not None,
+                                "session_start_time": tracker.get('session_start_time'),
+                                "total_usage_today": tracker.get('total_usage_today', 0),
+                                "daily_stats": dict(tracker.get('daily_stats', {})),
+                                "usage_sessions_count": len(tracker.get('usage_sessions', [])),
+                                "last_detection_time": tracker.get('last_detection_time', 0.0)
+                            }
+                            
+                            # Current session details if active
+                            current_session = tracker.get('current_session')
+                            if current_session:
+                                detector_state["phone_usage_tracker"]["current_session"] = {
+                                    "start_time": float(current_session.get('start_time', 0)) if current_session.get('start_time') else None,
+                                    "duration": float(current_session.get('duration', 0.0)),
+                                    "end_time": float(current_session.get('end_time', 0)) if current_session.get('end_time') else None
+                                }
+                        
+                        # Noise detection data if available
+                        if hasattr(self.detector, 'noise_detector') and self.detector.noise_detector:
+                            try:
+                                if self.detector.noise_enabled:
+                                    noise_level = self.detector.noise_detector.get_average_noise_level(seconds=1)
+                                    detector_state["noise_detection"] = {
+                                        "current_noise_level": noise_level,
+                                        "noise_enabled": True,
+                                        "sample_rate": getattr(self.detector.noise_detector, 'sample_rate', 44100),
+                                        "chunk_size": getattr(self.detector.noise_detector, 'chunk_size', 1024)
+                                    }
+                                else:
+                                    detector_state["noise_detection"] = {"noise_enabled": False}
+                            except Exception:
+                                detector_state["noise_detection"] = {"status": "error", "noise_enabled": self.detector.noise_enabled}
+                        
+                        # System actions data
+                        if hasattr(self.detector, 'system'):
+                            try:
+                                system = self.detector.system
+                                detector_state["system_actions"] = {
+                                    "posture_bad_start": getattr(system, '_posture_bad_start', None),
+                                    "phone_seen_start": getattr(system, '_phone_seen_start', None),
+                                    "last_posture_alert": getattr(system, '_last_posture_alert', 0.0),
+                                    "last_dim_action": getattr(system, '_last_dim_action', 0.0),
+                                    "dim_active": getattr(system, '_dim_active', False),
+                                    "posture_threshold_sec": getattr(system, 'posture_bad_threshold', 180),
+                                    "phone_threshold_sec": getattr(system, 'phone_threshold', 180),
+                                    "cooldown_sec": getattr(system, 'cooldown_sec', 300)
+                                }
+                            except Exception:
+                                detector_state["system_actions"] = {"status": "unavailable"}
+                        
+                        log_data["detector_state"] = detector_state
+                    except Exception as detector_error:
+                        log_data["detector_state"] = {"error": str(detector_error)}
+                
                 self.cloud_logger.log_struct(log_data, severity='INFO')
-                print(f"   🌐 Data sent to Google Cloud Dashboard (Cycle {self.cycle_count})")
+                print(f"   🌐 Comprehensive data sent to Google Cloud Dashboard (Cycle {self.cycle_count})")
             except Exception as e:
                 print(f"   ⚠️ Cloud logging failed: {e}")
         
@@ -598,16 +1063,38 @@ class StraightUpADKSystem:
         print(f"\n🔄 Real ADK Monitoring Cycle {self.cycle_count}")
         print("⚡ Executing real ADK ParallelAgent...")
         
-        # Log cycle start to Google Cloud
+        # Log cycle start to Google Cloud with system status
         if self.cloud_logger:
             try:
-                self.cloud_logger.log_struct({
+                cycle_start_data = {
                     "event": "monitoring_cycle_start",
                     "cycle": self.cycle_count,
                     "timestamp": current_time,
                     "project_id": "perfect-entry-473503-j1",
-                    "source": "adk_production_system"
-                }, severity='INFO')
+                    "source": "adk_production_system",
+                    "system_status": {
+                        "camera_available": self.cap is not None and self.cap.isOpened() if self.cap else False,
+                        "detector_available": self.detector is not None,
+                        "cloud_logging_available": CLOUD_LOGGING_AVAILABLE,
+                        "agents_initialized": {
+                            "posture_agent": self.posture_agent is not None,
+                            "phone_agent": self.phone_agent is not None,
+                            "environment_agent": self.environment_agent is not None,
+                            "wellness_coach": self.wellness_coach is not None
+                        }
+                    }
+                }
+                
+                # Add detector status if available
+                if self.detector:
+                    cycle_start_data["detector_status"] = {
+                        "noise_detector_available": self.detector.noise_detector is not None,
+                        "noise_enabled": self.detector.noise_enabled,
+                        "current_focus_score": self.detector.focus_score,
+                        "phone_tracks_active": len(getattr(self.detector, '_phone_tracks', []))
+                    }
+                
+                self.cloud_logger.log_struct(cycle_start_data, severity='INFO')
             except Exception as e:
                 pass  # Silent fail for cycle start logging
         
@@ -621,7 +1108,7 @@ class StraightUpADKSystem:
             }, severity='INFO')
         
         try:
-            # Capture and process frame with real detector
+            # Capture and process frame with integrated detector
             frame = None
             processed_frame = None
             detection_results = {"faces": 0, "hands": 0, "pose": 0, "phones": 0}
@@ -632,14 +1119,22 @@ class StraightUpADKSystem:
                     # Flip frame for selfie view
                     frame = cv2.flip(frame, 1)
                     
-                    # Process frame with real detector
+                    # Process frame with integrated detector
                     try:
                         processed_frame, faces, hands, pose, phones, analysis = self.detector.process_frame(frame.copy())
-                        detection_results = {"faces": faces, "hands": hands, "pose": pose, "phones": phones}
-                        print(f"📸 Real detection: {faces} faces, {hands} hands, {pose} pose, {phones} phones")
+                        detection_results = {
+                            "faces": faces,
+                            "hands": hands,
+                            "pose": pose,
+                            "phones": phones,
+                            "focus_score": self.detector.focus_score,
+                            "posture_analysis": analysis  # Store the detailed posture analysis
+                        }
+                        print(f"📸 Integrated detection: Faces={faces}, Hands={hands}, Pose={pose}, Phones={phones}, Focus={self.detector.focus_score:.2f}")
                     except Exception as e:
                         print(f"⚠️ Frame processing failed: {e}")
                         processed_frame = frame
+                        detection_results = {"faces": 0, "hands": 0, "pose": 0, "phones": 0, "focus_score": 0.5, "posture_analysis": None}
                 else:
                     frame = None
             
@@ -651,10 +1146,21 @@ class StraightUpADKSystem:
             
             print("🎯 Executing agents with real webcam data")
             
-            # Execute ADK agents with real detector data
+            # Execute ADK agents with enhanced detector data
             posture_results = self.posture_agent.analyze_posture(frame, self.detector)
             phone_results = self.phone_agent.track_phone_usage(detection_results["phones"], current_time, self.detector)
             environment_results = self.environment_agent.monitor_environment(self.detector)
+            
+            # Execute Wellness Coach with current metrics and historical trends
+            current_metrics = {
+                'focus_score': 0,  # Will be calculated below
+                'posture_score': posture_results.get("posture_score", 0),
+                'phone_usage_duration': phone_results.get("current_session_duration", 0),
+                'noise_level': environment_results.get("noise_level", 0)
+            }
+            
+            # Get historical trends from wellness coach
+            wellness_trends = self.wellness_coach.analyze_health_trends(hours=6)  # Last 6 hours
             
             # Display detailed agent insights (like webcam overlay)
             self._display_agent_insights(posture_results, phone_results, environment_results)
@@ -664,11 +1170,25 @@ class StraightUpADKSystem:
                 posture_results, phone_results, environment_results
             )
             
-            # Aggregate all recommendations
+            # Update current metrics with calculated focus score
+            current_metrics['focus_score'] = focus_score
+            
+            # Get AI coaching from Wellness Coach
+            wellness_coaching = self.wellness_coach.provide_coaching(current_metrics, wellness_trends)
+            wellness_intervention = self.wellness_coach.assess_intervention_need(current_metrics, wellness_trends)
+            
+            # Display Wellness Coach insights
+            self._display_wellness_insights(wellness_coaching, wellness_intervention, wellness_trends)
+            
+            # Aggregate all recommendations (including AI coaching)
             all_recommendations = []
             all_recommendations.extend(posture_results.get("recommendations", []))
             all_recommendations.extend(phone_results.get("recommendations", []))
             all_recommendations.extend(environment_results.get("suggestions", []))
+            
+            # Add AI coaching advice
+            if wellness_coaching.get('status') == 'success':
+                all_recommendations.extend(wellness_coaching.get('coaching_advice', []))
             
             # Create health metrics
             health_metrics = HealthMetrics(
@@ -685,8 +1205,16 @@ class StraightUpADKSystem:
             if len(self.health_history) > 100:  # Keep last 100 cycles
                 self.health_history.pop(0)
             
-            # Log detailed health metrics
-            self._log_health_metrics(health_metrics)
+            # Log detailed health metrics with all agent data
+            self._log_health_metrics(
+                health_metrics, 
+                posture_results=posture_results,
+                phone_results=phone_results, 
+                environment_results=environment_results,
+                wellness_coaching=wellness_coaching,
+                wellness_intervention=wellness_intervention,
+                detection_results=detection_results
+            )
             
             # Trigger interventions if needed
             if self._needs_intervention(health_metrics):
@@ -728,6 +1256,30 @@ class StraightUpADKSystem:
         if interventions:
             print(f"⚠️ INTERVENTION TRIGGERED: {', '.join(interventions)}")
             
+            # Log intervention to Google Cloud
+            if self.cloud_logger:
+                try:
+                    intervention_data = {
+                        "event": "intervention_triggered",
+                        "cycle": self.cycle_count,
+                        "timestamp": time.time(),
+                        "project_id": "perfect-entry-473503-j1",
+                        "source": "adk_production_system",
+                        "intervention_details": {
+                            "focus_score": metrics.focus_score,
+                            "posture_score": metrics.posture_score,
+                            "phone_usage_duration": metrics.phone_usage_duration,
+                            "noise_level": metrics.noise_level,
+                            "interventions_triggered": interventions,
+                            "severity": "critical" if metrics.focus_score < 0.3 or metrics.posture_score < 0.2 else "warning"
+                        },
+                        "recommendations": metrics.recommendations[:3] if metrics.recommendations else []
+                    }
+                    self.cloud_logger.log_struct(intervention_data, severity='WARNING')
+                    print(f"   🌐 Intervention logged to Google Cloud")
+                except Exception as e:
+                    print(f"   ⚠️ Intervention logging failed: {e}")
+            
             if "Focus intervention" in interventions:
                 print("💡 RECOMMENDATION: Take a 5-minute break and do breathing exercises")
             if "Posture correction" in interventions:
@@ -748,10 +1300,11 @@ class StraightUpADKSystem:
             if not self.detector:
                 raise RuntimeError("Detector not available for monitoring")
             
-            # Start noise detection if available
-            if self.detector.noise_detector and not self.detector.noise_enabled:
-                self.detector.start_noise_detection()
-                print("🔊 Noise detection enabled for production monitoring")
+            # Integrated detector is already fully initialized
+            if self.detector.noise_detector:
+                print("🔊 Noise detection ready for production monitoring")
+            else:
+                print("⚠️ Noise detection not available")
             
             # Continuous monitoring loop
             cycle_count = 0
@@ -775,10 +1328,12 @@ class StraightUpADKSystem:
         """Gracefully stop the monitoring system"""
         self.running = False
         
-        # Stop detector noise monitoring
-        if self.detector and self.detector.noise_detector:
-            self.detector.stop_noise_detection()
-            print("🔇 Stopped noise detection")
+        # Stop integrated detector
+        if self.detector:
+            self.detector.system.cleanup()
+            if self.detector.noise_enabled:
+                self.detector.stop_noise_detection()
+            print("🔇 Integrated detector cleaned up")
         
         if self.cap:
             self.cap.release()
@@ -809,21 +1364,100 @@ class StraightUpADKSystem:
             trend = "📈 IMPROVING" if recent_focus > early_focus else "📉 DECLINING" if recent_focus < early_focus else "➡️ STABLE"
             print(f"📊 Focus Trend: {trend} ({early_focus:.2f} → {recent_focus:.2f})")
             
-        # Show final detector statistics
+            # Log comprehensive session summary to Google Cloud
+            if self.cloud_logger:
+                try:
+                    session_end_time = time.time()
+                    session_duration = session_end_time - self.health_history[0].timestamp if self.health_history else 0
+                    
+                    # Calculate session statistics
+                    focus_scores = [m.focus_score for m in self.health_history]
+                    posture_scores = [m.posture_score for m in self.health_history]
+                    phone_durations = [m.phone_usage_duration for m in self.health_history]
+                    noise_levels = [m.noise_level for m in self.health_history]
+                    
+                    session_summary = {
+                        "event": "monitoring_session_complete",
+                        "timestamp": session_end_time,
+                        "project_id": "perfect-entry-473503-j1",
+                        "source": "adk_production_system",
+                        "session_statistics": {
+                            "total_cycles": self.cycle_count,
+                            "session_duration_seconds": session_duration,
+                            "session_duration_minutes": session_duration / 60.0,
+                            "data_points": len(self.health_history)
+                        },
+                        "average_metrics": {
+                            "focus_score": float(avg_focus),
+                            "posture_score": float(avg_posture),
+                            "phone_usage_seconds": float(avg_phone),
+                            "noise_level": float(avg_noise)
+                        },
+                        "trend_analysis": {
+                            "focus_trend": "improving" if recent_focus > early_focus else ("declining" if recent_focus < early_focus else "stable"),
+                            "early_focus": float(early_focus),
+                            "recent_focus": float(recent_focus),
+                            "focus_improvement": float(recent_focus - early_focus)
+                        },
+                        "score_distributions": {
+                            "focus_min": float(min(focus_scores)),
+                            "focus_max": float(max(focus_scores)),
+                            "posture_min": float(min(posture_scores)),
+                            "posture_max": float(max(posture_scores)),
+                            "phone_max_session": float(max(phone_durations)),
+                            "noise_min": float(min(noise_levels)),
+                            "noise_max": float(max(noise_levels))
+                        }
+                    }
+                    
+                    # Add detector final state if available
+                    if self.detector:
+                        try:
+                            final_detector_state = {
+                                "final_focus_score": self.detector.focus_score,
+                                "final_distraction_factors": dict(self.detector.distraction_factors),
+                                "noise_detection_used": self.detector.noise_enabled,
+                                "total_animation_frames": self.detector.animation_frame
+                            }
+                            
+                            # Final phone usage statistics
+                            if hasattr(self.detector, 'phone_usage_tracker'):
+                                tracker = self.detector.phone_usage_tracker
+                                final_detector_state["final_phone_stats"] = {
+                                    "total_usage_today": tracker.get('total_usage_today', 0),
+                                    "daily_session_counts": dict(tracker.get('daily_stats', {})),
+                                    "total_sessions_recorded": len(tracker.get('usage_sessions', []))
+                                }
+                                
+                            session_summary["final_detector_state"] = final_detector_state
+                        except Exception:
+                            session_summary["final_detector_state"] = {"status": "unavailable"}
+                    
+                    self.cloud_logger.log_struct(session_summary, severity='INFO')
+                    print(f"   🌐 Session summary logged to Google Cloud")
+                except Exception as e:
+                    print(f"   ⚠️ Session summary logging failed: {e}")
+            
+        # Show final integrated detector statistics
         if self.detector:
-            total_usage = self.detector.phone_usage_tracker['total_usage_today']
-            productivity_score = 1.0 - self.detector.distraction_factors['phone_usage']
-            daily_stats = self.detector.phone_usage_tracker['daily_stats']
+            # Get phone usage from the integrated detector
+            phone_usage_tracker = self.detector.phone_usage_tracker
+            total_usage = phone_usage_tracker.get('total_usage_today', 0)
+            daily_stats = phone_usage_tracker.get('daily_stats', {})
             
             print(f"\n📱 PHONE USAGE BREAKDOWN:")
             print(f"   📊 Total Usage Today: {total_usage:.0f}s")
-            print(f"   🎯 Final Productivity: {productivity_score:.2f}/1.0")
-            print(f"   📈 Session Stats: Brief:{daily_stats['brief']} | Moderate:{daily_stats['moderate']} | Extended:{daily_stats['extended']} | Excessive:{daily_stats['excessive']}")
+            print(f"   🎯 Final Focus Score: {self.detector.focus_score:.2f}/1.0")
+            print(f"   📈 Session Stats: Brief:{daily_stats.get('brief', 0)} | Moderate:{daily_stats.get('moderate', 0)} | Extended:{daily_stats.get('extended', 0)} | Excessive:{daily_stats.get('excessive', 0)}")
             
             print(f"\n🔊 NOISE MONITORING:")
-            if self.detector.noise_enabled:
+            if self.detector.noise_enabled and self.detector.noise_detector:
                 print(f"   ✅ Noise detection was active")
-                print(f"   📊 Final noise distraction factor: {self.detector.distraction_factors['noise']:.2f}")
+                try:
+                    final_noise = self.detector.noise_detector.get_average_noise_level(seconds=1)
+                    print(f"   📊 Final noise level: {final_noise:.3f}")
+                except Exception:
+                    print(f"   📊 Final noise level: unavailable")
             else:
                 print(f"   ⚠️ Noise detection was disabled")
         

@@ -53,6 +53,10 @@ POSE_L_EYE = 2
 POSE_R_EYE = 5
 POSE_L_SHO = 11
 POSE_R_SHO = 12
+POSE_L_EAR = 7
+POSE_R_EAR = 8
+POSE_L_HIP = 23
+POSE_R_HIP = 24
 
 def _pt(landmark, w, h):
     return (landmark.x * w, landmark.y * h, landmark.z)  # x,y in px, z in normalized units
@@ -63,6 +67,15 @@ def _vec(a, b):
 def _len(v):
     return math.hypot(v[0], v[1])
 
+def _clamp01(x): 
+    return max(0.0, min(1.0, float(x)))
+
+def _mid(a, b):
+    # works with (x, y, z) tuples returned by _pt
+    return ((a[0] + b[0]) * 0.5,
+            (a[1] + b[1]) * 0.5,
+            (a[2] + b[2]) * 0.5)
+
 def _angle_deg(u, v):
     dot = u[0]*v[0] + u[1]*v[1]
     nu = _len(u); nv = _len(v)
@@ -70,27 +83,65 @@ def _angle_deg(u, v):
     cosv = max(-1.0, min(1.0, dot/(nu*nv)))
     return math.degrees(math.acos(cosv))
 
+def _point_line_distance(p, a, b):
+    """Distance from point p(x,y) to segment a(x,y)–b(x,y) in pixels."""
+    ax, ay = a[0], a[1]
+    bx, by = b[0], b[1]
+    px, py = p
+    vx, vy = bx - ax, by - ay
+    den = vx*vx + vy*vy + 1e-6
+    t = max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / den))
+    cx, cy = ax + t * vx, ay + t * vy
+    return math.hypot(px - cx, py - cy)
+
 def _ema(prev, cur, a=0.3):
     return cur if prev is None else (a*cur + (1-a)*prev)
 
 @dataclass
 class Thresholds:
     # normalized by shoulder width unless noted
-    neck_flex_bad_deg: float = 9.5     # angle from vertical
+    neck_flex_bad_deg: float = 9.5
     neck_flex_warn_deg: float = 5.0
-    fhd_bad_ratio: float = 0.35         # forward-head: horizontal nose offset / shoulder width
-    fhd_warn_ratio: float = 0.25
     shoulder_slope_bad_deg: float = 180
     shoulder_slope_warn_deg: float = 170
-    head_tilt_bad_deg: float = 10.0     # roll from eye line
+    head_tilt_bad_deg: float = 10.0
     head_tilt_warn_deg: float = 6.0
 
-    fhd_depth_bad: float = 0.035      # nose forward vs shoulders in z (normalized units)
-    fhd_depth_warn: float = 0.020
+    # NEW: vertical (y) offset of nose vs neck, normalized by shoulder width
+    fhd_y_bad_max: float = 0.47
+    fhd_y_warn_max: float = 0.515
+    fhd_y_good_max: float = 0.70
 
-    # Shoulder openness via spacing (scale-invariant): shoulder_width / eye_distance
+    # Scale-safe openness (W/H kept)
     shoulder_open_bad_ratio: float = 5.00
     shoulder_open_warn_ratio: float = 5.50
+
+    # Chest-height (kept)
+    shoulder_height_bad_ratio: float = 0.12
+    shoulder_height_warn_ratio: float = 0.18
+
+    # ✅ MediaPipe Pose z: closer to camera is typically **more negative**
+    # So "more protracted" shoulders ==> **more negative** value.
+    shoulder_protraction_bad: float = -0.025   # <= -0.025 → BAD
+    shoulder_protraction_warn: float = -0.015  # <= -0.015 → WARN
+
+    # Baseline deltas (negative = moved closer vs baseline)
+    open_width_drop_bad: float = -0.18
+    open_width_drop_warn: float = -0.10
+    open_height_drop_bad: float = -0.30
+    open_height_drop_warn: float = -0.15
+
+    # ✅ Note: "increase" here means "toward camera" i.e. more negative
+    open_prot_increase_bad: float = -0.018     # <= -0.018 → BAD
+    open_prot_increase_warn: float = -0.010    # <= -0.010 → WARN
+
+    # NEW slouch-sensitive features
+    torso_pitch_bad_deg: float = 12.0          # forward lean of trunk
+    torso_pitch_warn_deg: float = 7.0
+    torso_len_drop_bad: float = -0.12          # drop vs baseline
+    torso_len_drop_warn: float = -0.06
+
+    yaw_gate_ratio: float = 0.75
 
 @dataclass
 class Hysteresis:
@@ -106,10 +157,8 @@ class PostureAnalyzer:
 
         # smoothed metrics
         self._neck_angle_v_deg_s = None
-        self._fhd_ratio_s = None
         self._shoulder_slope_deg_s = None
         self._head_tilt_deg_s = None
-        self._fhd_depth_s = None
         self._shoulder_open_ratio_s = None
 
         # sticky state for hysteresis
@@ -120,15 +169,42 @@ class PostureAnalyzer:
 
         self.last_analysis_ts = None
 
+        self._eye_dist_ref = None                 # EMA of eye distance (for yaw gate)
+        self._open_baseline_buf = deque(maxlen=120)  # ~4s @30fps
+        self._open_baseline = None      
+
+        self._torso_pitch_deg_s = None
+        self._torso_len_ratio_s = None
+        self._bad_torso = False
+
+        # --- UI / FPS ---
+        self._last_fps = 0.0
+
+        # --- Eye status smoothing / hysteresis ---
+        self.eye_ema_alpha = 0.4
+        self.EYE_CLOSED_THR = 0.18   # closed if both eyes < 0.18
+        self.EYE_OPEN_THR   = 0.22   # open if both eyes > 0.22
+        self._eye_ratio_left_s  = None
+        self._eye_ratio_right_s = None
+        self._eyes_closed = False
+
+        self._fhd_y_ratio_s = None
+        self._bad_fhd_y = False
+
+
+
+
     # ---------- metric calculators ----------
     def _compute_neck_vertical_angle_deg(self, neck_base_px, nose_px):
         v_neck = _vec(neck_base_px, nose_px)
         v_up = (0.0, -1.0)
         return _angle_deg(v_neck, v_up)
-
-    def _compute_forward_head_ratio(self, neck_base_px, nose_px, shoulder_width):
-        if shoulder_width <= 1e-6: return 0.0
-        return abs(nose_px[0] - neck_base_px[0]) / shoulder_width
+    
+    def _compute_forward_head_y_ratio(self, neck_base_px, nose_px, shoulder_width):
+        """Vertical offset magnitude (nose vs neck base) normalized by shoulder width."""
+        if shoulder_width <= 1e-6:
+            return 0.0
+        return abs(nose_px[1] - neck_base_px[1]) / shoulder_width
 
     def _compute_shoulder_slope_deg(self, l_sho, r_sho):
         vec_sr = _vec(l_sho, r_sho)
@@ -139,17 +215,43 @@ class PostureAnalyzer:
         v = _vec(l_eye, r_eye)
         deg = math.degrees(math.atan2(v[1], v[0]))
         return abs(deg)
-    
-    def _compute_forward_head_depth(self, nose, l_sho, r_sho):
-        """Positive when nose is closer to camera than the shoulders (i.e., head forward)."""
-        neck_z = (l_sho[2] + r_sho[2]) * 0.5
-        return max(0.0, neck_z - nose[2])
 
     def _compute_shoulder_open_ratio(self, l_sho, r_sho, l_eye, r_eye):
         """Shoulder spacing normalized by eye distance (scale-invariant)."""
         shoulder_w = _len(_vec(l_sho, r_sho))
         eye_w = _len(_vec(l_eye, r_eye)) + 1e-6
         return shoulder_w / eye_w
+    
+    def _compute_forward_head_y_ratio(self, neck_base_px, nose_px, shoulder_width):
+        """Vertical offset magnitude (nose vs neck base) normalized by shoulder width."""
+        if shoulder_width <= 1e-6:
+            return 0.0
+        return abs(nose_px[1] - neck_base_px[1]) / shoulder_width
+    
+    def _maybe_update_open_baseline(self, sample):
+        self._open_baseline_buf.append(sample)
+        if len(self._open_baseline_buf) < 30:  # need ~1s of data before trusting
+            return
+        # robust medians
+        arr_w = np.array([s['width'] for s in self._open_baseline_buf], dtype=float)
+        arr_h = np.array([s['height'] for s in self._open_baseline_buf], dtype=float)
+        arr_p = np.array([s['prot']  for s in self._open_baseline_buf], dtype=float)
+        baseline = {
+            'width': float(np.median(arr_w)),
+            'height': float(np.median(arr_h)),
+            'prot': float(np.median(arr_p)),
+        }
+        # light EMA to avoid snapping
+        if self._open_baseline is None:
+            self._open_baseline = baseline
+        else:
+            a = 0.1
+            self._open_baseline = {
+                'width': a*baseline['width'] + (1-a)*self._open_baseline['width'],
+                'height': a*baseline['height'] + (1-a)*self._open_baseline['height'],
+                'prot':  a*baseline['prot']  + (1-a)*self._open_baseline['prot'],
+            }
+
 
     def _apply_hysteresis(self, val, bad_thr, warn_thr, was_bad, is_ratio=False):
         # When recovering, add slack (lower strictness)
@@ -182,57 +284,136 @@ class PostureAnalyzer:
 
         # Required points present?
         try:
-            lmk = pose_landmarks.landmark
+            lmk  = pose_landmarks.landmark
             nose = _pt(lmk[POSE_NOSE], W, H)
             leye = _pt(lmk[POSE_L_EYE], W, H)
             reye = _pt(lmk[POSE_R_EYE], W, H)
             lsho = _pt(lmk[POSE_L_SHO], W, H)
             rsho = _pt(lmk[POSE_R_SHO], W, H)
+            lhip = _pt(lmk[POSE_L_HIP], W, H)
+            rhip = _pt(lmk[POSE_R_HIP], W, H)
+
+            # ears can fail; fall back to eyes
+            try:
+                lear = _pt(lmk[POSE_L_EAR], W, H)
+                rear = _pt(lmk[POSE_R_EAR], W, H)
+            except Exception:
+                lear, rear = leye, reye
         except Exception:
             return {"ok": False, "reason": "missing_landmarks"}
 
         # Derived anchors
         neck_base = ((lsho[0] + rsho[0]) * 0.5, (lsho[1] + rsho[1]) * 0.5)
         shoulder_width = _len(_vec(lsho, rsho))
+        ear_mid = _mid(lear, rear)  # NEW
+        hip_mid = _mid(lhip, rhip)  # NEW
+
+        # ---------- SCALE-SAFE SHOULDER OPENNESS METRICS ----------
+        # Use hip width as scale (robust to head yaw), not eye distance.
+        shoulder_width = _len(_vec(lsho, rsho))
+        hip_width = _len(_vec(lhip, rhip))
+        if hip_width < 5:  # pixels; unreliable scale for this frame
+            return {"ok": False, "reason": "bad_scale"}
+        width_norm = shoulder_width / (hip_width + 1e-6)      # higher = more open
+
+        # --- Torso metrics ---
+        # Length from hips to neck, normalized by hip width (drops when slouched)
+        torso_len_px = _len(_vec(hip_mid, neck_base))
+        torso_len_ratio = torso_len_px / (hip_width + 1e-6)
+
+        # Torso pitch: hip_mid -> neck_base vs vertical up
+        def _angle_to_up(a, b):
+            v = _vec(a, b); v_up = (0.0, -1.0)
+            return _angle_deg(v, v_up)
+        torso_pitch_deg = _angle_to_up(hip_mid, neck_base)
+
+
+        # Chest height (neck_base → shoulder line), normalized by shoulder width
+        # Use an apex that is NOT on the shoulder line
+        apex = (ear_mid[0], ear_mid[1])       # instead of neck_base
+        height_px = _point_line_distance(
+            apex,
+            (lsho[0], lsho[1]),
+            (rsho[0], rsho[1]),
+        )
+        height_ratio = float(height_px / (shoulder_width + 1e-6))
+
+        # Protraction depth (shoulders toward camera vs hips)
+        avg_sho_z = (lsho[2] + rsho[2]) * 0.5
+        hip_mid_z = (lhip[2] + rhip[2]) * 0.5
+        protraction = avg_sho_z - hip_mid_z  # larger => shoulders closer than hips
+
+        # ---------- HEAD-TURN (YAW) GATE ----------
+        eye_w_px = _len(_vec(leye, reye))
+        if self._eye_dist_ref is None:
+            self._eye_dist_ref = eye_w_px
+        else:
+            # Only update when roughly frontal so the reference doesn't drift smaller
+            if eye_w_px >= 0.9 * self._eye_dist_ref:
+                self._eye_dist_ref = _ema(self._eye_dist_ref, eye_w_px, 0.05)
+
+        yaw_ratio = eye_w_px / (self._eye_dist_ref + 1e-6)
+        yaw_turned = (yaw_ratio < self.thr.yaw_gate_ratio)  # ~0.75 ≈ moderate head turn
 
         # Raw metrics
         neck_angle_v_deg = self._compute_neck_vertical_angle_deg(neck_base, nose)
-        fhd_ratio        = self._compute_forward_head_ratio(neck_base, nose, shoulder_width)
         shoulder_slope   = self._compute_shoulder_slope_deg(lsho, rsho)
         head_tilt        = self._compute_head_tilt_deg(leye, reye)
-        fhd_depth        = self._compute_forward_head_depth(nose, lsho, rsho)
-        shoulder_open_r  = self._compute_shoulder_open_ratio(lsho, rsho, leye, reye)
 
+        # Forward head (Y) ALONG the torso axis
+        torso_v    = _vec(hip_mid, neck_base)
+        L          = _len(torso_v) + 1e-6
+        torso_hat  = (torso_v[0]/L, torso_v[1]/L)
+        nose_off   = _vec(neck_base, nose)
+        fhdy_along = abs(nose_off[0]*torso_hat[0] + nose_off[1]*torso_hat[1])
+        fhd_y_ratio = fhdy_along / (shoulder_width + 1e-6)
+
+        # Prepare a sample for the personal baseline update (done later after states are known)
+        open_sample = {'width': width_norm, 'height': height_ratio, 'prot': protraction, 'torso': torso_len_ratio}
+        looks_ok_enough = (not yaw_turned)  # we’ll require neck+FHD OK too before committing
+        
         # Smooth
         self._neck_angle_v_deg_s   = _ema(self._neck_angle_v_deg_s,   neck_angle_v_deg, self.a)
-        self._fhd_ratio_s          = _ema(self._fhd_ratio_s,          fhd_ratio,        self.a)
         self._shoulder_slope_deg_s = _ema(self._shoulder_slope_deg_s, shoulder_slope,   self.a)
         self._head_tilt_deg_s      = _ema(self._head_tilt_deg_s,      head_tilt,        self.a)
-        self._fhd_depth_s          = _ema(self._fhd_depth_s,          fhd_depth,        self.a)
-        self._shoulder_open_ratio_s= _ema(self._shoulder_open_ratio_s,shoulder_open_r,  self.a)
+        self._torso_pitch_deg_s = _ema(self._torso_pitch_deg_s, torso_pitch_deg, self.a)
+        self._torso_len_ratio_s = _ema(self._torso_len_ratio_s, torso_len_ratio, self.a)
+        self._fhd_y_ratio_s = _ema(self._fhd_y_ratio_s, fhd_y_ratio, self.a)
+
 
         # Hysteresis classification
         self._bad_neck, neck_state = self._apply_hysteresis(
             self._neck_angle_v_deg_s, self.thr.neck_flex_bad_deg, self.thr.neck_flex_warn_deg, self._bad_neck, is_ratio=False
         )
-        
-        # Combine 2D horizontal + depth forward into one state
-        ratio_bad, ratio_state = self._apply_hysteresis(
-            self._fhd_ratio_s, self.thr.fhd_bad_ratio, self.thr.fhd_warn_ratio, self._bad_fhd, is_ratio=True
-        )
-        depth_bad, depth_state = self._apply_hysteresis(
-            self._fhd_depth_s, self.thr.fhd_depth_bad, self.thr.fhd_depth_warn, self._bad_fhd, is_ratio=True
-        )
 
-        if ratio_bad or depth_bad:
-            self._bad_fhd = True
-            fhd_state = "BAD"
-        elif (ratio_state == "WARN") or (depth_state == "WARN"):
-            self._bad_fhd = False
-            fhd_state = "WARN"
+        torso_bad, torso_state = self._apply_hysteresis(
+            self._torso_pitch_deg_s, self.thr.torso_pitch_bad_deg, self.thr.torso_pitch_warn_deg,
+            self._bad_torso, is_ratio=False
+        )
+        self._bad_torso = torso_bad
+
+        
+      
+        
+        val_y = float(self._fhd_y_ratio_s if self._fhd_y_ratio_s is not None else 0.0)
+        if val_y <= self.thr.fhd_y_bad_max:
+            fhdy_state = "BAD";  self._bad_fhd_y = True
+        elif val_y <= self.thr.fhd_y_warn_max:
+            fhdy_state = "WARN"; self._bad_fhd_y = False
         else:
-            self._bad_fhd = False
-            fhd_state = "OK"
+            # OK for 0.48–0.70 and beyond
+            fhdy_state = "OK";   self._bad_fhd_y = False
+
+
+       # Treat forward_head == forward_head_y for the rest of the system
+        fhd_state = fhdy_state
+        self._bad_fhd = (fhd_state == "BAD")
+
+        # (Removed) CVA angle banding and X/Z fusion above
+
+        # Baseline gate (unchanged)
+        if looks_ok_enough and (neck_state == "OK") and (fhd_state == "OK"):
+            self._maybe_update_open_baseline(open_sample)
 
         # Shoulder slope bands
         ang = float(self._shoulder_slope_deg_s) if self._shoulder_slope_deg_s is not None else 0.0
@@ -246,44 +427,112 @@ class PostureAnalyzer:
             sho_state = "OK"
             self._bad_sho = False
 
-        self._bad_tilt, tilt_state = self._apply_hysteresis(
-            self._head_tilt_deg_s, self.thr.head_tilt_bad_deg, self.thr.head_tilt_warn_deg, self._bad_tilt, is_ratio=False
-        )
+        # --- Head tilt bands (treat 175.5–180 as OK, 170–175.5 WARN, else BAD)
+        tilt_raw = float(self._head_tilt_deg_s) if self._head_tilt_deg_s is not None else 0.0
+        # Map to distance-from-horizontal so 0° and 180° both behave as "level"
+        tilt_dist = min(tilt_raw, 180.0 - tilt_raw)
 
-        # Shoulder openness bands
-        if self._shoulder_open_ratio_s is None:
-            sho_open_state = "BAD"
-        else:
-            r = float(self._shoulder_open_ratio_s)
-            if r < self.thr.shoulder_open_bad_ratio:
-                sho_open_state = "BAD"
-            elif r < self.thr.shoulder_open_warn_ratio:
-                sho_open_state = "WARN"
+        WARN_BAND = 0.5
+
+        if tilt_dist <= 3.5:          # ≙ raw 175.5–180
+            tilt_state = "OK"
+            self._bad_tilt = False
+        elif tilt_dist <= 3.5 + WARN_BAND:       # ≙ raw 170–175.5
+            tilt_state = "WARN"
+            self._bad_tilt = False
+        else:                         # ≙ raw 0–170
+            tilt_state = "BAD"
+            self._bad_tilt = True
+        # ---------- PERSONAL BASELINE UPDATE (when frame looks good) ----------
+        if looks_ok_enough and (neck_state == "OK") and (fhd_state == "OK"):
+            self._maybe_update_open_baseline(open_sample)
+
+        # ---------- SHOULDER OPENNESS CLASSIFICATION ----------
+        if self._open_baseline is None:
+            width_state  = "BAD" if width_norm  < 1.10 else ("WARN" if width_norm  < 1.20 else "OK")
+            height_state = "BAD" if height_ratio < 0.12 else ("WARN" if height_ratio < 0.18 else "OK")
+
+            #  protraction closer-to-camera is more negative
+            if protraction <= self.thr.shoulder_protraction_bad:
+                prot_state = "BAD"
+            elif protraction <= self.thr.shoulder_protraction_warn:
+                prot_state = "WARN"
             else:
-                sho_open_state = "OK"
+                prot_state = "OK"
+
+            # NEW: a very lenient absolute band for torso length (until baseline forms)
+            torso_state = "BAD" if torso_len_ratio < 0.95 else ("WARN" if torso_len_ratio < 1.05 else "OK")
+
+        else:
+            bw = self._open_baseline['width']  + 1e-6
+            bh = self._open_baseline['height'] + 1e-6
+            bp = self._open_baseline['prot']
+            bt = self._open_baseline.get('torso', torso_len_ratio) + 1e-6
+
+            d_width  = (width_norm  - bw) / bw          # negative => more closed
+            d_height = (height_ratio - bh) / bh         # negative => more closed
+            d_prot   = (protraction - bp)               # positive => more closed
+            d_torso  = (torso_len_ratio - bt) / bt          # negative => shorter
+
+
+            width_state  = "BAD"  if d_width  <= self.thr.open_width_drop_bad  else ("WARN" if d_width  <= self.thr.open_width_drop_warn  else "OK")
+            height_state = "BAD"  if d_height <= self.thr.open_height_drop_bad else ("WARN" if d_height <= self.thr.open_height_drop_warn else "OK")
+
+            # ✅ more negative than baseline is "increased protraction"
+            if d_prot <= self.thr.open_prot_increase_bad:
+                prot_state = "BAD"
+            elif d_prot <= self.thr.open_prot_increase_warn:
+                prot_state = "WARN"
+            else:
+                prot_state = "OK"
+
+            torso_state = "BAD" if d_torso <= self.thr.torso_len_drop_bad else ("WARN" if d_torso <= self.thr.torso_len_drop_warn else "OK")
+
+        # Combine subfeatures; IGNORE width when head is turned (yaw_turned)
+        bad_count  = int(height_state=="BAD") + int(prot_state=="BAD") + (0 if yaw_turned else int(width_state=="BAD"))
+        warn_count = int(height_state=="WARN")+ int(prot_state=="WARN")+ (0 if yaw_turned else int(width_state=="WARN"))
+
+        if bad_count >= 2:
+            sho_open_state = "BAD"
+        elif bad_count == 1 or warn_count >= 2:
+            sho_open_state = "WARN"
+        else:
+            sho_open_state = "OK"
 
         overall_bad = (
             self._bad_neck or self._bad_fhd or self._bad_sho or self._bad_tilt
-            or (sho_open_state == "BAD")
+            or (sho_open_state == "BAD") or self._bad_torso
         )
+
 
         overall_state = "BAD" if overall_bad else (
-                "WARN" if ("BAD" in [neck_state, fhd_state, sho_state, tilt_state, sho_open_state] or
-                "WARN" in [neck_state, fhd_state, sho_state, tilt_state, sho_open_state]) else "OK"
+            "WARN" if ("BAD" in [neck_state, fhd_state, sho_state, tilt_state, sho_open_state] or
+            "WARN" in [neck_state, fhd_state, sho_state, tilt_state, sho_open_state]) else "OK"
         )
 
-        self.last_analysis_ts = time.time()
+
         return {
             "ok": True,
             "state": overall_state,
             "metrics": {
-                "neck_angle_deg": float(self._neck_angle_v_deg_s),
-                "forward_head_ratio": float(self._fhd_ratio_s),
-                "shoulder_slope_deg": float(self._shoulder_slope_deg_s),
-                "head_tilt_deg": float(self._head_tilt_deg_s),
-                "shoulder_width_px": float(shoulder_width),
-                "fwd_head_depth": float(self._fhd_depth_s),
-                "shoulder_open_ratio": float(self._shoulder_open_ratio_s),
+                # Head/neck & pose (smoothed)
+                "neck_angle_deg":      float(self._neck_angle_v_deg_s),
+                "shoulder_slope_deg":  float(self._shoulder_slope_deg_s),
+                "head_tilt_deg":       float(self._head_tilt_deg_s),
+
+                # New shoulder-open features
+                "shoulder_width_norm": float(width_norm),
+                "shoulder_height_ratio": float(height_ratio),
+                "shoulder_protraction": float(protraction),
+
+                # Yaw gate debug
+                "yaw_ratio":           float(yaw_ratio),
+
+                "torso_pitch_deg": float(self._torso_pitch_deg_s),
+                "torso_len_ratio": float(self._torso_len_ratio_s),
+
+                "forward_head_y_ratio": float(self._fhd_y_ratio_s),
+
             },
             "states": {
                 "neck_flexion": neck_state,
@@ -291,6 +540,13 @@ class PostureAnalyzer:
                 "shoulder_level": sho_state,
                 "head_tilt": tilt_state,
                 "shoulder_open": sho_open_state,
+                # (optional) expose which sub-features said what:
+                "open_width": width_state,
+                "open_height": height_state,
+                "open_protraction": prot_state,
+                "open_torso": torso_state,
+                "forward_head_y": fhdy_state,
+                "torso_pitch": torso_state if False else ("BAD" if self._bad_torso else ("WARN" if self._torso_pitch_deg_s >= self.thr.torso_pitch_warn_deg else "OK")),
             },
             "points": {
                 "neck_base_px": (float(neck_base[0]), float(neck_base[1])),
@@ -303,7 +559,7 @@ class PostureAnalyzer:
         }
 
     def draw_overlay(self, image, analysis):
-        """Draw posture analysis overlay on image"""
+        """Draw posture analysis overlay on image (auto-fits to ≤42% of width)."""
         if not analysis.get("ok"):
             return
 
@@ -312,81 +568,91 @@ class PostureAnalyzer:
         s = analysis.get("states", {})
         overall = analysis.get("state", "OK")
 
-        # Layout config
-        margin = 16
-        pad_x, pad_y = 16, 14
-        body_scale = 0.85
-        header_scale = 1.15
+        # Layout (slightly smaller defaults)
+        margin = 12
+        pad_x, pad_y = 12, 10
+        body_scale = 0.70
+        header_scale = 1.00
         body_th = 2
         header_th = 2
-        line_gap = int(30 * body_scale)
+        line_gap = int(26 * body_scale)
+        MAX_PANEL_W = int(w * 0.42)  # never let the card exceed ~40% of the frame width
 
         # Colors
         C_OK   = (80, 220, 100)
         C_WARN = (0, 215, 255)
         C_BAD  = (50, 50, 255)
         C_BG   = (0, 0, 0)
+        def col(state): return C_OK if state == "OK" else C_WARN if state == "WARN" else C_BAD
 
-        def col(state):
-            return C_OK if state == "OK" else C_WARN if state == "WARN" else C_BAD
-
-        # Build lines
+        # Build concise lines
         lines = []
-        lines.append((
-            "Neck flex", f"{m.get('neck_angle_deg', 0.0):.1f}\u00B0", s.get("neck_flexion", "OK")
-        ))
-        lines.append((
-            "Forward head (x)", f"{m.get('forward_head_ratio', 0.0):.2f}x", s.get("forward_head", "OK")
-        ))
-        if "fwd_head_depth" in m:
-            lines.append((
-                "Head fwd (z)", f"{m.get('fwd_head_depth', 0.0):.3f}", s.get("forward_head", "OK")
-            ))
-        lines.append((
-            "Shoulder slope", f"{m.get('shoulder_slope_deg', 0.0):.1f}\u00B0", s.get("shoulder_level", "OK")
-        ))
-        if "shoulder_open_ratio" in m and "shoulder_open" in s:
-            lines.append((
-                "Shoulder open", f"{m.get('shoulder_open_ratio', 0.0):.2f}", s.get("shoulder_open", "OK")
-            ))
-        lines.append((
-            "Head tilt", f"{m.get('head_tilt_deg', 0.0):.1f}\u00B0", s.get("head_tilt", "OK")
-        ))
+        lines.append(("Neck flex", f"{m.get('neck_angle_deg', 0.0):.1f}\u00B0", s.get("neck_flexion", "OK")))
+        lines.append(("Forward head (y)", f"{m.get('forward_head_y_ratio', 0.0):.2f}x",s.get("forward_head_y", "OK")))
+        lines.append(("Shoulder slope", f"{m.get('shoulder_slope_deg', 0.0):.1f}\u00B0", s.get("shoulder_level", "OK")))
 
-        # Measure text to size the card
+        if "shoulder_width_norm" in m and "shoulder_open" in s:
+            # shorter sub-metrics to keep width under control
+            so_val = (
+                f"W {m['shoulder_width_norm']:.2f}  "
+                f"H {m['shoulder_height_ratio']:.2f}  "
+                f"P {m['shoulder_protraction']:.3f}  "
+                f"T {m.get('torso_len_ratio',0.0):.2f}"
+            )
+            lines.append(("Shoulder open", so_val, s.get("shoulder_open", "OK")))
+            lines.append(("Torso pitch", f"{m.get('torso_pitch_deg',0.0):.1f}\u00B0", s.get("torso_pitch","OK")))
+
+        lines.append(("Head tilt", f"{m.get('head_tilt_deg', 0.0):.1f}\u00B0", s.get("head_tilt", "OK")))
+
         header_txt = f"POSTURE: {overall}"
-        (hw, hh), _ = cv2.getTextSize(header_txt, cv2.FONT_HERSHEY_SIMPLEX, header_scale, header_th)
 
-        max_line_w = 0
-        for label, val, state in lines:
-            txt = f"{label}: {val}  [{state}]"
-            (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, body_scale, body_th)
-            max_line_w = max(max_line_w, tw)
+        # --- measurement helper (so we can rescale if too wide) ---
+        def measure(sc_body, sc_head):
+            max_line_w = 0
+            for label, val, state in lines:
+                txt = f"{label}: {val}  [{state}]"
+                (tw, _), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, sc_body, body_th)
+                max_line_w = max(max_line_w, tw)
+            (hw, hh), _ = cv2.getTextSize(header_txt, cv2.FONT_HERSHEY_SIMPLEX, sc_head, header_th)
+            card_w = max(hw, max_line_w) + 2 * pad_x
+            card_h = (pad_y + hh + 10) + (len(lines) * line_gap) + pad_y
+            return card_w, card_h, hh
 
-        card_w = max(hw, max_line_w) + 2 * pad_x
-        card_h = (pad_y + hh + 10) + (len(lines) * line_gap) + pad_y
+        card_w, card_h, hh = measure(body_scale, header_scale)
+
+        # If too wide, shrink fonts proportionally (but not below legible limits)
+        if card_w > MAX_PANEL_W:
+            shrink = MAX_PANEL_W / float(card_w)
+            body_scale = max(0.55, body_scale * shrink)
+            header_scale = max(0.85, header_scale * shrink)
+            line_gap = int(26 * body_scale)
+            body_th = max(1, int(round(2 * body_scale)))
+            header_th = max(1, int(round(2 * header_scale)))
+            card_w, card_h, hh = measure(body_scale, header_scale)
 
         # Anchor at top-right
-        x0 = w - card_w - margin
+        x0 = w - int(card_w) - margin
         y0 = margin
-        x1 = x0 + card_w
-        y1 = y0 + card_h
+        x1 = w - margin
+        y1 = y0 + int(card_h)
 
         # Draw card
         cv2.rectangle(image, (x0, y0), (x1, y1), C_BG, -1)
         cv2.rectangle(image, (x0, y0), (x1, y1), col(overall), 3)
 
-        # Draw header
+        # Header
+        (hw, _), _ = cv2.getTextSize(header_txt, cv2.FONT_HERSHEY_SIMPLEX, header_scale, header_th)
         hx = x0 + pad_x
         hy = y0 + pad_y + hh
         cv2.putText(image, header_txt, (hx, hy), cv2.FONT_HERSHEY_SIMPLEX, header_scale, col(overall), header_th, cv2.LINE_AA)
 
-        # Draw lines
+        # Body lines
         y = hy + 12
         for label, val, state in lines:
             txt = f"{label}: {val}  [{state}]"
             y += line_gap
             cv2.putText(image, txt, (hx, y), cv2.FONT_HERSHEY_SIMPLEX, body_scale, col(state), body_th, cv2.LINE_AA)
+
 
 # ======================= SYSTEM ACTIONS =======================
 
@@ -518,6 +784,70 @@ class SystemActions:
 # ======================= INTEGRATED DETECTOR =======================
 
 class IntegratedPoseDetector:
+    # Class-level safety defaults (instance can override in __init__)
+    eye_ema_alpha = 0.4
+    EYE_CLOSED_THR = 0.18
+    EYE_OPEN_THR = 0.22
+    _eye_ratio_left_s = None
+    _eye_ratio_right_s = None
+    _eyes_closed = False
+
+    def _eye_open_ratio(self, face_landmarks, image_shape, side="left"):
+    
+        h, w = image_shape[:2]
+        if side == "left":
+            upper_idx, lower_idx = 159, 145  # upper/lower eyelid
+            corner_a, corner_b = 33, 133     # eye corners
+        else:
+            upper_idx, lower_idx = 386, 374
+            corner_a, corner_b = 362, 263
+
+        lms = face_landmarks.landmark
+        uy, ly = lms[upper_idx].y * h, lms[lower_idx].y * h
+        ax, ay = lms[corner_a].x * w, lms[corner_a].y * h
+        bx, by = lms[corner_b].x * w, lms[corner_b].y * h
+
+        vdist = abs(uy - ly)
+        hdist = math.hypot(bx - ax, by - ay) + 1e-6
+        return float(vdist / hdist)
+
+    def _update_eyes_closed(self, face_landmarks, image_shape):
+        """
+        Smooth + hysteresis: returns (eyes_closed, left_ratio, right_ratio)
+        eyes_closed flips to True only when BOTH eyes are under CLOSED_THR;
+        flips back to False when BOTH exceed OPEN_THR.
+        """
+        # Safety guard in case __init__ didn’t run these fields
+        if not hasattr(self, "eye_ema_alpha"):
+            self.eye_ema_alpha = 0.4
+            self.EYE_CLOSED_THR = 0.18
+            self.EYE_OPEN_THR = 0.22
+        if not hasattr(self, "_eye_ratio_left_s"):
+            self._eye_ratio_left_s = None
+            self._eye_ratio_right_s = None
+            self._eyes_closed = False
+
+        left = self._eye_open_ratio(face_landmarks, image_shape, "left")
+        right = self._eye_open_ratio(face_landmarks, image_shape, "right")
+
+        # Smooth the ratios a bit to avoid flicker
+        a = self.eye_ema_alpha
+        self._eye_ratio_left_s  = left  if self._eye_ratio_left_s  is None else (a*left  + (1-a)*self._eye_ratio_left_s)
+        self._eye_ratio_right_s = right if self._eye_ratio_right_s is None else (a*right + (1-a)*self._eye_ratio_right_s)
+
+        L = self._eye_ratio_left_s
+        R = self._eye_ratio_right_s
+
+        # Hysteresis
+        if self._eyes_closed:
+            if (L >= self.EYE_OPEN_THR) and (R >= self.EYE_OPEN_THR):
+                self._eyes_closed = False
+        else:
+            if (L < self.EYE_CLOSED_THR) and (R < self.EYE_CLOSED_THR):
+                self._eyes_closed = True
+
+        return self._eyes_closed, L, R
+
     def __init__(self, enable_noise_detection=True):
         # Initialize MediaPipe solutions
         self.mp_face_mesh = mp.solutions.face_mesh
@@ -658,6 +988,16 @@ class IntegratedPoseDetector:
         self.trail_points = []
         self.animation_frame = 0
         self.pulse_factor = 0
+
+        self._last_fps = 0.0
+
+        # --- Eye status smoothing / hysteresis (needed by _update_eyes_closed) ---
+        self.eye_ema_alpha = 0.4
+        self.EYE_CLOSED_THR = 0.18   # closed if both eyes < 0.18
+        self.EYE_OPEN_THR   = 0.22   # open if both eyes > 0.22
+        self._eye_ratio_left_s  = None
+        self._eye_ratio_right_s = None
+        self._eyes_closed = False
     
     # -------------------- Utility Functions --------------------
     def _ema_smooth(self, prev, cur, a=0.3):
@@ -907,9 +1247,9 @@ class IntegratedPoseDetector:
         cv2.line(image, (left_x, left_y), (right_x, right_y), self.SHOULDER_COLOR, 3)
         
         # Add shoulder labels
-        cv2.putText(image, "L.SHOULDER", (left_x - 60, left_y - 15), 
+        cv2.putText(image, "R.SHOULDER", (left_x - 60, left_y - 15), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.SHOULDER_COLOR, 1)
-        cv2.putText(image, "R.SHOULDER", (right_x + 10, right_y - 15), 
+        cv2.putText(image, "L.SHOULDER", (right_x + 10, right_y - 15), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.SHOULDER_COLOR, 1)
     
     def draw_glow_effect(self, image, points, color, glow_color, thickness=3):
@@ -1194,79 +1534,87 @@ class IntegratedPoseDetector:
         
         return phones_detected_now
     
-    def draw_enhanced_info_panel(self, image, faces, hands, pose, phones):
-        """Draw enhanced info panel with noise and focus information"""
+    def draw_enhanced_info_panel(self, image, faces, hands, pose, phones, analysis=None):
         h, w = image.shape[:2]
-        
-        # Main status box (made wider for phone stats)
-        cv2.rectangle(image, (10, 10), (550, 220), (0, 0, 0), -1)
-        cv2.rectangle(image, (10, 10), (550, 220), (255, 255, 255), 2)
-        
-        # Basic detection info  
-        cv2.putText(image, f"Faces: {faces}", (20, 35), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.putText(image, f"Hands: {hands}", (20, 55), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.putText(image, f"Pose: {'Yes' if pose else 'No'}", (20, 75), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-        cv2.putText(image, f"Phones: {phones}", (20, 95), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
-        
-        # Focus score
-        focus_color = (100, 100, 255)  # Default blue
+        x0, y0 = 10, 10
+        pad_x, pad_y = 12, 12
+        line_gap = 22
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 0.6
+        thick = 2
+
+        # Pull eye & focus info
+        eye_detected = bool(analysis.get("eyes_detected")) if analysis else False
+        eyes_closed  = bool(analysis.get("eyes_closed")) if analysis else False
+
+        # Colors
+        C_WHITE = (255, 255, 255)
+        C_GRAY  = (200, 200, 200)
+        C_OK    = (80, 220, 100)
+        C_WARN  = (0, 215, 255)
+        C_BAD   = (50, 50, 255)
+        C_YEL   = (0, 255, 255)
+        C_MAG   = (255, 0, 255)
+        C_BLUE  = (255, 0, 0)
+        C_BG    = (0, 0, 0)
+
+        # Focus color
         if self.focus_score > 0.7:
-            focus_color = (0, 255, 0)  # Green for good focus
+            focus_col = C_OK
         elif self.focus_score < 0.4:
-            focus_color = (0, 0, 255)  # Red for poor focus
-        
-        cv2.putText(image, f"Focus: {self.focus_score:.2f}", (20, 120), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, focus_color, 2)
-        
-        # Noise detection status
-        noise_status = "OFF"
-        noise_color = (100, 100, 100)
-        if self.noise_enabled and self.noise_detector:
-            noise_status = "ON"
-            noise_color = (0, 255, 0)
-        
-        cv2.putText(image, f"Noise: {noise_status}", (280, 35), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, noise_color, 2)
-        
-        # Phone detection smoothing status
-        if len(self.phone_detection_history) >= self.phone_smoothing_window:
-            recent_detections = self.phone_detection_history[-self.phone_smoothing_window:]
-            detection_ratio = sum(1 for x in recent_detections if x > 0) / len(recent_detections)
-            smooth_color = (0, 255, 0) if detection_ratio >= self.phone_detection_threshold else (100, 100, 100)
-            cv2.putText(image, f"Phone Smooth: {detection_ratio:.1f}", (280, 95), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, smooth_color, 2)
-        
-        # Session status
+            focus_col = C_BAD
+        else:
+            focus_col = C_WARN
+
+        # Eye colors
+        eye_det_col = C_OK if eye_detected else C_BAD
+        eye_closed_col = C_BAD if eyes_closed else C_OK
+
+        # Build lines (text, color)
+        lines = [
+            (f"FPS: {getattr(self, '_last_fps', 0):.1f}", C_OK),
+            (f"Faces: {faces}", C_YEL),
+            (f"Hands: {hands}", C_OK),
+            (f"Pose: {'Yes' if pose else 'No'}", C_BLUE),
+            (f"Phones: {phones}", C_MAG),
+            (f"Eye Detected: {eye_detected}", eye_det_col),
+            (f"Eyes Closed: {eyes_closed}", eye_closed_col),
+            (f"Focus: {self.focus_score:.2f}", focus_col),
+        ]
+
+        # Optional: noise + session info
+        noise_on = (self.noise_enabled and (self.noise_detector is not None))
+        lines.append((f"Noise: {'ON' if noise_on else 'OFF'}", C_OK if noise_on else C_GRAY))
+
         session_status = "None"
         if self.phone_usage_tracker['current_session'] is not None:
             session_status = "Active"
         elif self.session_candidate_start is not None:
             session_status = "Candidate"
-        
-        cv2.putText(image, f"Session: {session_status}", (280, 120), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-        
-        # Current session duration if active
+        lines.append((f"Session: {session_status}", C_YEL))
+
         if self.phone_usage_tracker['current_session']:
-            duration = self.phone_usage_tracker['current_session']['duration']
-            cv2.putText(image, f"Duration: {duration:.1f}s", (280, 140), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-        
-        # Daily phone usage stats
-        stats = self.phone_usage_tracker['daily_stats']
-        total_sessions = sum(stats.values())
-        if total_sessions > 0:
-            cv2.putText(image, f"Today: {total_sessions} sessions", (280, 160), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-            cv2.putText(image, f"Brief:{stats['brief']} Mod:{stats['moderate']}", (280, 175), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-            cv2.putText(image, f"Ext:{stats['extended']} Exc:{stats['excessive']}", (280, 190), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
-    
+            dur = self.phone_usage_tracker['current_session']['duration']
+            lines.append((f"Duration: {dur:.1f}s", C_WHITE))
+
+        # Compute dynamic box size
+        max_w = 0
+        for txt, col in lines:
+            (tw, th), _ = cv2.getTextSize(txt, font, scale, thick)
+            max_w = max(max_w, tw)
+        box_w = max_w + 2 * pad_x
+        box_h = pad_y + len(lines) * line_gap + pad_y
+
+        # Draw panel
+        cv2.rectangle(image, (x0, y0), (x0 + box_w, y0 + box_h), C_BG, -1)
+        cv2.rectangle(image, (x0, y0), (x0 + box_w, y0 + box_h), C_WHITE, 2)
+
+        # Draw lines
+        y = y0 + pad_y + 4
+        for txt, col in lines:
+            y += line_gap
+            cv2.putText(image, txt, (x0 + pad_x, y), font, scale, col, thick, cv2.LINE_AA)
+
     def draw_phone_usage_graph(self, image, position=(50, 250), width=300, height=80):
         """Draw phone usage history graph"""
         if not self.phone_usage_tracker['usage_sessions']:
@@ -1333,11 +1681,27 @@ class IntegratedPoseDetector:
         # Animation tick
         self.animation_frame += 1
 
-        # Posture analysis and system actions
         analysis = {"ok": False}
+
+        # --- Eye detection & closed/open status ---
+        eye_detected = False
+        eyes_closed = False
+        left_ratio = right_ratio = None
+        if faces_detected:
+            face_lms = face_results.multi_face_landmarks[0]
+            eyes_closed, left_ratio, right_ratio = self._update_eyes_closed(face_lms, image.shape)
+            eye_detected = True
+
+        # Posture analysis
         if pose_detected:
             analysis = self.posture.analyze(pose_results.pose_landmarks, image.shape)
             self.posture.draw_overlay(image, analysis)
+
+        # Expose to analysis dict for anyone else
+        analysis["eyes_detected"] = eye_detected
+        analysis["eyes_closed"] = eyes_closed
+        analysis["eye_open_ratio_left"]  = float(left_ratio)  if left_ratio  is not None else None
+        analysis["eye_open_ratio_right"] = float(right_ratio) if right_ratio is not None else None
 
         # System actions (notifications / dimming)
         self.system.update(analysis, phones_detected)
@@ -1372,7 +1736,7 @@ class IntegratedPoseDetector:
             self.draw_shoulder_highlight(image, pose_results.pose_landmarks)
         
         # Draw enhanced info panel with all statistics
-        self.draw_enhanced_info_panel(image, faces_detected, hands_detected, pose_detected, phones_detected)
+        self.draw_enhanced_info_panel(image, faces_detected, hands_detected, pose_detected, phones_detected, analysis)
         
         # Draw noise indicators if enabled
         if self.noise_enabled and self.noise_detector:
@@ -1393,11 +1757,11 @@ class IntegratedPoseDetector:
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        
+
         if not cap.isOpened():
             print("Error: Could not open webcam")
             return
-        
+
         print("🎯 StraightUp Integrated Detection System Started!")
         print("=" * 60)
         print("✨ Integrated Features:")
@@ -1408,9 +1772,9 @@ class IntegratedPoseDetector:
         print("   📏 Neck: Smooth center line mapping (EMA smoothed)")
         print("   📱 Phones: Enhanced YOLO11n tracking with smoothing")
         print("   🧍 Posture: Real-time analysis with hysteresis")
-        print("   � Noise: Environmental sound monitoring (press 'n')")
+        print("   🔊 Noise: Environmental sound monitoring (press 'n')")
         print("   📊 Focus: Real-time distraction analysis")
-        print("   �🔔 Notifications: Windows toast notifications")
+        print("   🔔 Notifications: Windows toast notifications")
         print("   🌙 Screen Dimming: Automatic gamma adjustment")
         print("   ✨ All with GLOW EFFECTS and smooth animations!")
         print("\n⌨️  Controls:")
@@ -1420,13 +1784,15 @@ class IntegratedPoseDetector:
         print("   'n': Toggle noise detection")
         print("   Space: Pause/Resume detection")
         print("=" * 60)
-        
-        # Performance tracking
+
+        # ---- Proper local init (fixes UnboundLocalError) ----
         prev_time = time.time()
         fps_counter = 0
+        self._last_fps = 0.0
         show_info = True
         paused = False
-        
+        last_processed_frame = None  # used while paused
+
         try:
             while True:
                 if not paused:
@@ -1434,120 +1800,78 @@ class IntegratedPoseDetector:
                     if not ret:
                         print("Failed to grab frame")
                         break
-                    
-                    # Flip frame horizontally for selfie-view
                     frame = cv2.flip(frame, 1)
-                    
-                    # Process detections with integrated analysis
                     processed_frame, faces, hands, pose, phones, analysis = self.process_frame(frame)
+                    last_processed_frame = processed_frame.copy()
                 else:
-                    processed_frame = frame.copy()
-                
-                # Calculate FPS
+                    if last_processed_frame is not None:
+                        processed_frame = last_processed_frame.copy()
+                    else:
+                        # safe fallback if paused immediately on startup
+                        processed_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+                # ---- FPS (stable value in the info panel) ----
                 current_time = time.time()
                 fps_counter += 1
                 if current_time - prev_time >= 1.0:
-                    fps = fps_counter / (current_time - prev_time)
+                    self._last_fps = fps_counter / (current_time - prev_time)
                     fps_counter = 0
                     prev_time = current_time
-                else:
-                    fps = 0
-                
-                # Draw info overlay
+
+                # ---- Optional legend / overlays ----
                 if show_info:
                     h, w = processed_frame.shape[:2]
-                    
-                    # Status box
-                    cv2.rectangle(processed_frame, (10, 10), (450, 200), (0, 0, 0), -1)
-                    cv2.rectangle(processed_frame, (10, 10), (450, 200), (255, 255, 255), 2)
-                    
-                    # Status text
-                    cv2.putText(processed_frame, f"FPS: {fps:.1f}", (20, 35), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(processed_frame, f"Faces: {faces}", (20, 60), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                    cv2.putText(processed_frame, f"Hands: {hands}", (20, 85), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(processed_frame, f"Pose: {'Yes' if pose else 'No'}", (20, 110), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
-                    cv2.putText(processed_frame, f"Phones: {phones}", (20, 135), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
-                    
-                    # Posture status
-                    if analysis.get("ok"):
-                        posture_state = analysis.get("state", "UNKNOWN")
-                        posture_color = (80, 220, 100) if posture_state == "OK" else (0, 215, 255) if posture_state == "WARN" else (50, 50, 255)
-                        cv2.putText(processed_frame, f"Posture: {posture_state}", (20, 160), 
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, posture_color, 2)
-                    
-                    # System status
-                    dim_status = "DIM" if self.system._dim_active else "NORMAL"
-                    cv2.putText(processed_frame, f"Screen: {dim_status}", (20, 185), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-                    
-                    # Legend
                     legend_y = h - 100
                     cv2.rectangle(processed_frame, (10, legend_y - 10), (500, h - 10), (0, 0, 0), -1)
                     cv2.rectangle(processed_frame, (10, legend_y - 10), (500, h - 10), (255, 255, 255), 1)
-                    
-                    cv2.putText(processed_frame, "Eyes: Cyan + Red Iris", (20, legend_y + 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
-                    cv2.putText(processed_frame, "Hands: Green Glow", (20, legend_y + 30), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-                    cv2.putText(processed_frame, "Shoulders: Yellow Highlight", (20, legend_y + 50), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                    cv2.putText(processed_frame, "Body: Blue/Pink Skeleton", (20, legend_y + 70), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                    cv2.putText(processed_frame, "Phones: Magenta (Enhanced)", (280, legend_y + 10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
-                    cv2.putText(processed_frame, "Neck: Yellow center line", (280, legend_y + 30), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-                    cv2.putText(processed_frame, "Posture: Real-time analysis", (280, legend_y + 50), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-                    cv2.putText(processed_frame, "System: Smart notifications", (280, legend_y + 70), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-                
-                # Pause indicator
-                if paused:
-                    h, w = processed_frame.shape[:2]
-                    cv2.rectangle(processed_frame, (w//2 - 100, h//2 - 30), (w//2 + 100, h//2 + 30), (0, 0, 0), -1)
-                    cv2.putText(processed_frame, "PAUSED", (w//2 - 80, h//2 + 5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
-                
+                    cv2.putText(processed_frame, "Eyes: Cyan + Red Iris", (20, legend_y + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                    cv2.putText(processed_frame, "Hands: Green Glow", (20, legend_y + 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    cv2.putText(processed_frame, "Shoulders: Yellow Highlight", (20, legend_y + 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                    cv2.putText(processed_frame, "Body: Blue/Pink Skeleton", (20, legend_y + 70),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+                    cv2.putText(processed_frame, "Phones: Magenta (Enhanced)", (280, legend_y + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+                    cv2.putText(processed_frame, "Neck: Yellow center line", (280, legend_y + 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+                    cv2.putText(processed_frame, "Posture: Real-time analysis", (280, legend_y + 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                    cv2.putText(processed_frame, "System: Smart notifications", (280, legend_y + 70),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+                # ---- Show & keys ----
                 cv2.imshow('StraightUp - Integrated Detection System', processed_frame)
-                
-                # Handle key presses
                 key = cv2.waitKey(1) & 0xFF
-                if key == ord('q') or key == 27:  # 'q' or ESC
+                if key in (ord('q'), 27):
                     break
-                elif key == ord('s'):  # Save frame
+                elif key == ord('s'):
                     timestamp = int(time.time())
                     filename = f'integrated_capture_{timestamp}.jpg'
                     cv2.imwrite(filename, processed_frame)
                     print(f"💾 Frame saved as {filename}")
-                elif key == ord('i'):  # Toggle info
+                elif key == ord('i'):
                     show_info = not show_info
                     print(f"ℹ️  Info display: {'ON' if show_info else 'OFF'}")
-                elif key == ord(' '):  # Space to pause
+                elif key == ord(' '):
                     paused = not paused
                     print(f"⏸️  {'Paused' if paused else 'Resumed'}")
-                elif key == ord('n'):  # Toggle noise detection
-                    success = self.toggle_noise_detection()
+                elif key == ord('n'):
+                    self.toggle_noise_detection()
                     status = "enabled" if self.noise_enabled else "disabled"
                     print(f"🔊 Noise detection {status}")
-        
+
         except KeyboardInterrupt:
             print("\n🛑 Stopped by user")
         finally:
             cap.release()
             cv2.destroyAllWindows()
-            
-            # Clean up noise detection
             if self.noise_enabled:
                 self.stop_noise_detection()
-            
             self.system.cleanup()
             print("✅ Integrated detection completed")
+
 
 def main():
     """Main function to run the integrated detection system"""
