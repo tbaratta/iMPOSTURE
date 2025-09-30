@@ -1,12 +1,16 @@
-# iMPOSTURE 🎯  
-> *AI-powered posture and wellness tracker for students and professionals.*  
+# iMPOSTURE ## ✨ Features  
+- 📷 **Posture Detection** – Detects slouching or poor posture via camera  
+- ⏱️ **Break Reminders** – Alerts you when it's time to take a wellness break  
+- 📱 **Distraction Tracking** – Monitors phone usage and logs distractions  
+- 📊 **Wellness Dashboard** – Shows posture data, break history, and focus trends
+> *Posture and wellness tracker for students and professionals.*  
 
 iMPOSTURE helps you stay healthy and productive by monitoring your posture, reminding you to take breaks, and logging distractions in real time. Built for classrooms, remote workers, and corporate wellness.  
 
 ---
 
-## 🚀 Inspiration  
-Poor posture and long hours at a desk can cause back pain, fatigue, and reduced focus. We wanted to build a tool that not only **detects bad posture** but also encourages **healthier habits** and better well-being.  
+## 🚀 Why We Built This  
+Poor posture and long hours at a desk can cause back pain, fatigue, and reduced focus. We wanted to build a tool that detects bad posture and encourages healthier habits.  
 
 ---
 
@@ -20,7 +24,7 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 
 ## 🛠️ Tech Stack  
 - **Backend**: Python, Flask  
-- **AI / CV**: MediaPipe, YOLO  
+- **Computer Vision**: MediaPipe, YOLO  
 - **Frontend**: HTML, CSS, JavaScript (Dashboard)  
 - **Other**: OpenCV, NumPy  
 

@@ -1,15 +1,6 @@
 """
-StraightUp - Integrated Detection System
-Real-time detection with MediaPipe, YOLO11n, Posture Analysis, and System Actions
-
-Combined Features:
-- Enhanced pose detection with eye contours and animated iris tracking
-- Full 21-point hand skeleton with glow effects  
-- Complete body pose with neck center line mapping
-- Enhanced phone detection with smooth tracking
-- Intelligent posture analysis with hysteresis
-- System actions (notifications and screen dimming)
-- Real-time webcam processing with comprehensive controls
+iMPOSTURE Detection System
+Pose detection and phone tracking using MediaPipe and YOLO
 """
 
 import cv2
@@ -23,7 +14,7 @@ from ultralytics import YOLO
 from collections import deque
 from dataclasses import dataclass
 
-# Import our noise detector (will handle missing pyaudio gracefully)
+# Noise detection (optional)
 try:
     from noise_detector import NoiseDetector
     NOISE_DETECTION_AVAILABLE = True
@@ -38,14 +29,14 @@ except Exception as e:
     NOISE_DETECTION_AVAILABLE = False
     NoiseDetector = None
 
-# ---- Optional toast support (non-fatal if missing) ----
+# Toast notifications
 try:
-    from win10toast import ToastNotifier   # pip install win10toast
+    from win10toast import ToastNotifier
     _toaster = ToastNotifier()
 except Exception:
     _toaster = None
 
-    # --- Sticky always-on-top popup (Windows-friendly) ---
+    # Popup window setup
 import threading, queue
 import tkinter as tk
 
@@ -59,9 +50,9 @@ class StickyPopup:
     def _ui_thread(self):
         self.root = tk.Tk()
         self.root.withdraw()
-        self.root.overrideredirect(True)           # no title bar
-        self.root.attributes("-topmost", True)     # always on top
-        self.root.attributes("-alpha", 0.94)       # slight transparency
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", 0.94)
 
         self.frame = tk.Frame(self.root, bg="#111111", bd=2, highlightthickness=2, highlightbackground="#FF4081")
         self.frame.pack(fill="both", expand=True)
@@ -75,7 +66,7 @@ class StickyPopup:
                 while True:
                     cmd, payload = self._cmd_q.get_nowait()
                     if cmd == "show":
-                        # payload can be a string (back-compat) or a dict with pos/size/sub/border
+
                         if isinstance(payload, str):
                             msg = payload
                             sub = "Hold neutral posture to dismiss"
@@ -171,9 +162,9 @@ class StickyPopup:
         return self._visible
 
 
-# ======================= POSTURE ANALYSIS =======================
+# Posture Analysis
 
-# MediaPipe pose landmarks
+
 POSE_NOSE = 0
 POSE_L_EYE = 2
 POSE_R_EYE = 5
@@ -185,7 +176,7 @@ POSE_L_HIP = 23
 POSE_R_HIP = 24
 
 def _pt(landmark, w, h):
-    return (landmark.x * w, landmark.y * h, landmark.z)  # x,y in px, z in normalized units
+    return (landmark.x * w, landmark.y * h, landmark.z)
 
 def _vec(a, b):
     return (b[0]-a[0], b[1]-a[1])
@@ -197,7 +188,7 @@ def _clamp01(x):
     return max(0.0, min(1.0, float(x)))
 
 def _mid(a, b):
-    # works with (x, y, z) tuples returned by _pt
+
     return ((a[0] + b[0]) * 0.5,
             (a[1] + b[1]) * 0.5,
             (a[2] + b[2]) * 0.5)
@@ -257,7 +248,7 @@ class Thresholds:
     open_height_drop_bad: float = -0.30
     open_height_drop_warn: float = -0.15
 
-    # ✅ Note: "increase" here means "toward camera" i.e. more negative
+
     open_prot_increase_bad: float = -0.018     # <= -0.018 → BAD
     open_prot_increase_warn: float = -0.010    # <= -0.010 → WARN
 

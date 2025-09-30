@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, asdict
 from typing import Dict, List, Any, Optional
 
-# Google Cloud logging and monitoring
+
 try:
     from google.cloud import logging as cloud_logging
     from google.cloud import monitoring_v3
@@ -23,22 +23,22 @@ except ImportError:
     CLOUD_LOGGING_AVAILABLE = False
     print("⚠️ Google Cloud logging not available - install: pip install google-cloud-logging google-cloud-monitoring")
 
-# Set Google Cloud Project
+# Google Cloud project
 os.environ['GOOGLE_CLOUD_PROJECT'] = 'perfect-entry-473503-j1'
 
-# Import our integrated detector system  
+# Detector system
 from detector import IntegratedPoseDetector
 
-# REAL Google ADK imports - NOT SIMULATION!
+# Google ADK imports
 import google.adk
 from google.adk.agents import Agent, LlmAgent, LoopAgent, ParallelAgent
 from google.adk.tools import FunctionTool
 from google.adk.models import Gemini
 from google.adk.runners import InvocationContext
 
-print(f"🚀 REAL Google ADK Version: {google.adk.__version__}")
+print(f"🚀 Google ADK Version: {google.adk.__version__}")
 print(f"📍 ADK Package Location: {google.adk.__file__}")
-print("✅ REAL ADK imports successful - NO SIMULATION!")
+print("✅ ADK imports successful")
 
 @dataclass
 class HealthMetrics:
@@ -102,7 +102,7 @@ class PostureAnalysisAgent(Agent):
     """ADK Agent for real-time posture analysis"""
     
     def __init__(self):
-        # Initialize with Gemini model
+        # Initialize Gemini model
         super().__init__(
             name="posture_analyzer",
             description="Analyzes user posture for workplace wellness using computer vision",
@@ -114,19 +114,19 @@ class PostureAnalysisAgent(Agent):
         print("🎯 Posture Analysis Agent initialized")
         
     def analyze_posture(self, image_data: Optional[np.ndarray] = None, detector: Optional[IntegratedPoseDetector] = None) -> Dict[str, Any]:
-        """Analyze posture using real MediaPipe detection from detector.py"""
+        """Analyze posture using MediaPipe detection"""
         try:
-            # Use integrated detector - no simulation
+            # Using integrated detector
             if image_data is not None and detector is not None:
                 # Process frame with integrated detector
                 processed_image, faces, hands, pose, phones, analysis = detector.process_frame(image_data.copy())
                 
-                # Calculate posture score based on REAL posture analysis
+                # Calculate posture score
                 if pose > 0 and analysis.get('ok'):
-                    # Use the REAL posture analysis from integrated detector
+                    # Get posture analysis
                     overall_state = analysis.get('state', 'OK')
                     
-                    # Convert posture state to numeric score
+
                     if overall_state == 'OK':
                         posture_score = 0.8
                     elif overall_state == 'WARN':
@@ -136,11 +136,11 @@ class PostureAnalysisAgent(Agent):
                     else:
                         posture_score = 0.5
                     
-                    # Get metrics for shoulder and neck alignment
+
                     metrics = analysis.get('metrics', {})
                     states = analysis.get('states', {})
                     
-                    # Calculate shoulder alignment from shoulder slope
+
                     shoulder_slope_deg = metrics.get('shoulder_slope_deg', 0)
                     shoulder_alignment = max(0.0, 1.0 - (shoulder_slope_deg / 45.0)) if shoulder_slope_deg else 0.5
                     
@@ -826,7 +826,7 @@ class StraightUpADKSystem:
         print(f"   📱 Phone Usage: {metrics.phone_usage_duration:.1f}s {'🟢' if metrics.phone_usage_duration < 10 else '🟡' if metrics.phone_usage_duration < 30 else '🔴'}")
         print(f"   🔊 Noise Level: {metrics.noise_level:.3f} {'🟢' if metrics.noise_level < 0.3 else '🟡' if metrics.noise_level < 0.6 else '🔴'}")
         
-        # Send comprehensive data to Google Cloud Logging
+        # Send data to Google Cloud Logging
         if self.cloud_logger:
             try:
                 # Base metrics
@@ -853,7 +853,7 @@ class StraightUpADKSystem:
                         "detector_focus_score": detection_results.get("focus_score", 0.0)
                     }
                     
-                    # Add comprehensive posture analysis data from detector
+                    # Add posture analysis data from detector
                     posture_analysis = detection_results.get("posture_analysis")
                     if posture_analysis and posture_analysis.get("ok"):
                         log_data["detailed_posture_analysis"] = {
@@ -943,7 +943,7 @@ class StraightUpADKSystem:
                         "reasons": wellness_intervention.get("reasons", [])
                     }
                 
-                # Add integrated detector comprehensive data if available
+                # Add integrated detector data if available
                 if self.detector:
                     try:
                         detector_state = {
@@ -1037,7 +1037,7 @@ class StraightUpADKSystem:
                         log_data["detector_state"] = {"error": str(detector_error)}
                 
                 self.cloud_logger.log_struct(log_data, severity='INFO')
-                print(f"   🌐 Comprehensive data sent to Google Cloud Dashboard (Cycle {self.cycle_count})")
+                print(f"   🌐 Data sent to Google Cloud Dashboard (Cycle {self.cycle_count})")
             except Exception as e:
                 print(f"   ⚠️ Cloud logging failed: {e}")
         
@@ -1343,7 +1343,7 @@ class StraightUpADKSystem:
         print(f"📊 Total monitoring cycles completed: {self.cycle_count}")
         
         if self.health_history:
-            # Show comprehensive session summary
+            # Show session summary
             print(f"\n" + "=" * 60)
             print("📊 ADK SESSION SUMMARY")
             print("=" * 60)
@@ -1364,7 +1364,7 @@ class StraightUpADKSystem:
             trend = "📈 IMPROVING" if recent_focus > early_focus else "📉 DECLINING" if recent_focus < early_focus else "➡️ STABLE"
             print(f"📊 Focus Trend: {trend} ({early_focus:.2f} → {recent_focus:.2f})")
             
-            # Log comprehensive session summary to Google Cloud
+            # Log session summary to Google Cloud
             if self.cloud_logger:
                 try:
                     session_end_time = time.time()

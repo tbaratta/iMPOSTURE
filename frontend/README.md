@@ -1,17 +1,17 @@
 # 🖥️ StraightUp Desktop Dashboard
 
-A native desktop application for real-time health monitoring that connects directly to your Google ADK production system.
+A desktop application for health monitoring that connects to your Google ADK production system.
 
 ## 📊 **Desktop App Overview**
 
-The desktop dashboard provides a native Windows application that pulls real-time health data directly from your Google Cloud Logging:
+The desktop dashboard provides a Windows application that pulls health data from your Google Cloud Logging:
 
 - **Real-time health metrics** from your ADK agents
 - **Interactive charts and trends** showing focus and posture over time  
-- **Health recommendations** based on actual usage patterns
+- **Health recommendations** based on usage patterns
 - **System status monitoring** to track ADK agent activity
 - **Overall health grading** with A-F scoring system
-- **Native desktop experience** with no browser required
+- **Desktop experience** with no browser required
 
 ## 🔄 **Data Flow Architecture**
 

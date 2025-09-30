@@ -1,74 +1,35 @@
 # StraightUp 🎯
 
-**Enhanced Pose Detection System with Real-time Computer Vision & Noise Monitoring**
+**Pose Detection System with Computer Vision & Noise Monitoring**
 
-A compr## 🔊 Technical Details
-
-**AI Models:**
-- **MediaPipe:** Face mesh (468 landmarks), hands (21 points each), pose (33 points)
-- **YOLO11n:** Phone detection with confidence scoring
-- **EMA Smoothing:** Neck center line and phone tracking
-
-**Audio Processing:**
-- **Sample Rate:** 44.1kHz with 1024-sample chunks
-- **Analysis:** Real-time RMS level calculation and frequency analysis
-- **Smoothing:** Exponential moving average for consistent readings
-- **Threading:** Non-blocking audio processing in separate thread
-
-**Performance:**
-- **Resolution:** 1280x720 (HD)
-- **FPS:** 60+ target with optimizations
-- **Audio Latency:** <50ms for real-time responsiveness
-- **Platform:** Cross-platform (Windows, Mac, Linux)
-- **Hardware:** CPU-based inference (no GPU required)
-
-**Visual Effects:**
-- Multi-layer glow effects with neon colors
-- Animated pulsing joints and fingertips
-- Smooth EMA-based neck center line mapping
-- Real-time noise level visualization
-- Focus score and distraction analysis displays detection system that combines MediaPipe, YOLO11n, and audio noise detection for advanced human pose analysis with environmental awareness and stunning visual effects.
+A real-time detection system that combines MediaPipe and YOLO11n for human pose analysis with noise monitoring.
 
 ## ✨ Features
 
 ### 🎥 Visual Detection
-- **👁️ Eyes:** Natural contours with animated iris tracking
-- **🤲 Hands:** NEON skeleton with pulsing fingertips (21-point detection)
-- **💪 Shoulders:** Highlighted with glow effects and labels
-- **🏃 Body:** Electric skeleton with animated joints (33-point pose)
-- **🔗 Neck:** Smooth center line mapping with EMA smoothing
-- **📱 Phones:** Enhanced YOLO11n detection with smooth tracking
-- **✨ All with multi-layer glow effects and smooth animations**
+- **👁️ Eyes:** Eye tracking with iris detection
+- **🤲 Hands:** Hand skeleton with fingertip detection (21 points)
+- **💪 Shoulders:** Shoulder position highlighting
+- **🏃 Body:** Full body pose detection (33 points)
+- **🔗 Neck:** Neck center line mapping
+- **📱 Phones:** Phone detection with tracking
+- **✨ Visual effects and smooth animations**
 
 ### 🔊 Audio Noise Detection
-- **🎤 Real-time Audio Monitoring:** Continuous ambient noise level analysis
+- **🎤 Real-time Audio Monitoring:** Ambient noise level analysis
 - **🎚️ Adjustable Sensitivity:** Low, medium, high, and very high sensitivity modes
 - **📊 Visual Indicators:** Live noise level bars and history graphs
-- **⚠️ Smart Alerts:** Context-aware notifications for noise events
+- **⚠️ Smart Alerts:** Notifications for noise events
 - **📈 Frequency Analysis:** Peak frequency detection and classification
-- **🎯 Focus Analysis:** AI-powered focus score based on environmental factors
+- **🎯 Focus Analysis:** Focus score based on environmental factors
 
 ### 📱 Smart Phone Alerts
-- **⏱️ Usage Tracking:** Real-time phone usage session monitoring
-- **🎯 Smart Notifications:** Context-aware alerts for different usage patterns
-- **💪 Motivational Messages:** Encouraging feedback for good habits
-- **📊 Usage Analytics:** Detailed statistics and usage pattern analysis
+- **⏱️ Usage Tracking:** Phone usage session monitoring
+- **🎯 Smart Notifications:** Alerts for different usage patterns
+- **💪 Motivational Messages:** Feedback for good habits
+- **📊 Usage Analytics:** Statistics and usage pattern analysis
 - **🎨 Visual Feedback:** Usage history graphs and productivity scores
-- **☕ Break Suggestions:** Intelligent recommendations for healthy breaks
-
-**Enhanced Pose Detection System with Real-time Computer Vision**
-
-A comprehensive real-time detection system that combines MediaPipe and YOLO11n for advanced human pose analysis with stunning visual effects.
-
-## ✨ Features
-
-- **👁️ Eyes:** Natural contours with animated iris tracking
-- **🤲 Hands:** NEON skeleton with pulsing fingertips (21-point detection)
-- **💪 Shoulders:** Highlighted with glow effects and labels
-- **🏃 Body:** Electric skeleton with animated joints (33-point pose)
-- **🔗 Neck:** Smooth center line mapping with EMA smoothing
-- **� Phones:** Enhanced YOLO11n detection with smooth tracking
-- **✨ All with multi-layer glow effects and smooth animations**
+- **☕ Break Suggestions:** Recommendations for healthy breaks
 
 ## 🚀 Quick Start
 
@@ -213,7 +174,7 @@ StraightUp/backend/
 
 ## 📝 Notes
 
-This project leverages Google's MediaPipe framework for comprehensive human pose analysis combined with Ultralytics YOLO11n for object detection. The enhanced visual effects and smooth tracking make it perfect for demonstrations and real-world applications.
+This project uses Google's MediaPipe framework for human pose analysis combined with Ultralytics YOLO11n for object detection. The visual effects and tracking make it good for demonstrations and real-world applications.
 
 **Built for modern computer vision applications** 🚀
 

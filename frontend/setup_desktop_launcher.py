@@ -144,7 +144,7 @@ def main():
     if customtkinter_available:
         print("3. 📊 Original Dashboard (CustomTkinter)")
         print("   • Full dashboard with charts")
-        print("   • Comprehensive health analytics")
+        print("   • Health analytics")
         print("   • Traditional desktop layout")
         print()
     

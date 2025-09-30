@@ -1,7 +1,6 @@
 """
-StraightUp Modern Desktop App - Pure Tkinter
-Beautiful desktop interface matching the web UI design (no CustomTkinter dependency)
-Project: perfect-entry-473503-j1
+iMPOSTURE Desktop App
+Health monitoring interface
 """
 
 import tkinter as tk
@@ -120,7 +119,8 @@ class HealthDataManager:
     def get_recent_health_data(self, hours: int = 24, limit: int = 100) -> List[Dict[str, Any]]:
         """Fetch recent health data from Google Cloud Logging"""
         if not self.cloud_logging_client:
-            return self._generate_sample_data()
+            print("⚠️ No cloud logging client - returning empty data")
+            return []
         
         try:
             # Calculate time range
@@ -161,7 +161,8 @@ class HealthDataManager:
             
         except Exception as e:
             print(f"⚠️ Error fetching from Google Cloud: {e}")
-            return self._generate_sample_data()
+            print("📊 Returning empty data - no fake data allowed")
+            return []
     
     def get_health_summary(self, hours: int = 24) -> Dict[str, Any]:
         """Get aggregated health summary statistics"""
@@ -290,32 +291,7 @@ class HealthDataManager:
         else:
             return 'F'
     
-    def _generate_sample_data(self) -> List[Dict[str, Any]]:
-        """Generate sample data for demo purposes"""
-        import random
-        
-        sample_data = []
-        base_time = datetime.utcnow()
-        
-        for i in range(20):
-            timestamp = base_time - timedelta(minutes=i * 5)
-            sample_data.append({
-                'timestamp': timestamp.isoformat(),
-                'focus_score': round(random.uniform(0.4, 0.9), 3),
-                'posture_score': round(random.uniform(0.3, 0.9), 3),
-                'phone_usage_seconds': round(random.uniform(0, 45), 1),
-                'noise_level': round(random.uniform(0.1, 0.6), 3),
-                'recommendations': random.choice([
-                    ['🎯 Focus on alignment', '✅ Good posture'],
-                    ['🔴 Neck flexion critical - Raise monitor', '🟡 Minor shoulder imbalance'],
-                    ['📱 Brief phone check', '🌟 Excellent posture!'],
-                    []
-                ]),
-                'cycle': 100 - i,
-                'agent_status': 'operational'
-            })
-        
-        return sample_data
+
 
 class ModernTkinterApp:
     """Modern desktop app using pure Tkinter with web UI styling"""
@@ -1609,7 +1585,7 @@ class ModernTkinterApp:
     def start_adk_production(self):
         """Start the ADK production webcam monitoring system"""
         try:
-            # Path to the backend directory - more robust path resolution
+            # Path to the backend directory
             current_file = os.path.abspath(__file__)
             frontend_dir = os.path.dirname(current_file)
             project_root = os.path.dirname(frontend_dir)
@@ -1931,7 +1907,7 @@ class ModernTkinterApp:
         
         # Stop ADK production system (turns off camera)
         print("🛑 Stopping session - shutting down camera monitoring...")
-        self.camera_off()
+        self.stop_adk_production()
         
         # Reset session state
         self.session_running = False
