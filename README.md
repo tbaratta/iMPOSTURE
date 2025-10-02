@@ -18,7 +18,7 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 ---
 
 ## 🛠️ Tech Stack  
-- **Backend**: Python, Flask  
+- **Backend**: Google Cloud's ADK  
 - **Computer Vision**: MediaPipe, YOLO  
 - **Frontend**: HTML, CSS, JavaScript (Dashboard)  
 - **Other**: OpenCV, NumPy  
