@@ -107,7 +107,7 @@ Poor posture and long hours at a desk can cause back pain, fatigue, and reduced 
 
 ## 👥 Team
 
-StraightUp was built during ShellHacks 2025 by:
+iMPOSTURE was built during ShellHacks 2025 by:
 
 - **Tommy Baratta**
 - **Allison Brown**
